@@ -189,6 +189,15 @@ jobs:
         with:
           workspaces: codex-rs
 
+      - name: Set up Codex-built rusty_v8
+        # codex-code-mode-host links V8; the default rusty_v8 prebuilt archive is
+        # not published for this profile, so use openai/codex's rusty-v8-v* release
+        # artifacts (this sets RUSTY_V8_ARCHIVE + RUSTY_V8_SRC_BINDING_PATH).
+        if: steps.decide.outputs.needed == '1'
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ env.TARGET_TRIPLE }}
+
       - name: Build release binaries
         if: steps.decide.outputs.needed == '1'
         working-directory: codex-rs
