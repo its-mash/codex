@@ -1,0 +1,238 @@
+name: fork-sync-release
+
+# Keep this fork riding on top of openai/codex and publish installable releases.
+#
+#   schedule / manual  -> merge openai/codex main into this fork's main
+#       clean merge     -> push, then build + publish a GitHub Release
+#       conflict        -> open/refresh an issue with local-fix steps, fail the run
+#   push to main       -> (your conflict fix lands here) build + publish if HEAD is unreleased
+#
+# The local machine only consumes the published Release (see fork-tools/codex-update.sh),
+# exactly like the official codex auto-update flow.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours (UTC)
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: "Build + publish a release even if HEAD is already released"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths-ignore:
+      - "design/**"
+      - "fork-tools/**"
+      - "**/*.md"
+
+concurrency:
+  group: fork-sync-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  UPSTREAM_URL: https://github.com/openai/codex.git
+  TARGET_TRIPLE: x86_64-unknown-linux-gnu
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.state.outputs.head_sha }}
+      short_sha: ${{ steps.state.outputs.short_sha }}
+    steps:
+      - name: Checkout fork main (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "fork-sync-bot"
+          git config user.email "fork-sync-bot@users.noreply.github.com"
+          git config rerere.enabled true
+
+      - name: Merge latest openai/codex
+        if: github.event_name != 'push'
+        id: merge
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch --prune upstream main
+          behind="$(git rev-list --count HEAD..upstream/main)"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          if [ "$behind" = "0" ]; then
+            echo "Already up to date with openai/codex."
+            exit 0
+          fi
+          echo "Merging $behind upstream commit(s)."
+          if git merge --no-edit upstream/main; then
+            echo "Clean merge."
+            git push origin main
+          else
+            conflicts="$(git diff --name-only --diff-filter=U | paste -sd', ' - || true)"
+            git merge --abort || true
+            {
+              echo "conflict=1"
+              echo "conflicts<<EOF"
+              echo "$conflicts"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Open / refresh upstream-sync-conflict issue
+        if: failure() && steps.merge.outputs.conflict == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+          BEHIND: ${{ steps.merge.outputs.behind }}
+        run: |
+          set -euo pipefail
+          title="⚠️ Upstream sync conflict: resolve openai/codex merge"
+          body=$(cat <<EOF
+          The scheduled fork sync could not merge \`openai/codex\` main into this fork's \`main\`
+          because of conflicts, so auto-sync is paused until you resolve it locally.
+
+          **Conflicting files:** ${CONFLICTS:-<none reported>}
+          **Upstream commits behind:** ${BEHIND:-?}
+
+          ### Resolve locally, then auto-sync continues
+          \`\`\`bash
+          cd /home/benty/codex
+          git fetch upstream main            # remote 'upstream' -> openai/codex
+          git merge upstream/main            # resolve the conflicts it reports
+          # ...edit files, then:
+          git add -A
+          git commit                          # completes the merge
+          git push origin main                # this push builds + publishes a release
+          \`\`\`
+          rerere is enabled, so once you resolve a given conflict it is replayed
+          automatically on future syncs. This issue auto-closes on the next clean sync.
+          EOF
+          )
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --label upstream-sync-conflict --json number --jq '.[0].number' 2>/dev/null || true)"
+          gh label create upstream-sync-conflict --repo "$GITHUB_REPOSITORY" \
+            --color B60205 --description "Fork cannot merge openai/codex cleanly" 2>/dev/null || true
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
+              --body "Sync still blocked as of $(date -u +%FT%TZ). $body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --label upstream-sync-conflict --body "$body"
+          fi
+
+      - name: Close stale conflict issue after a clean sync
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for n in $(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --label upstream-sync-conflict --json number --jq '.[].number' 2>/dev/null); do
+            gh issue close "$n" --repo "$GITHUB_REPOSITORY" \
+              --comment "Fork synced cleanly at $(date -u +%FT%TZ); closing." || true
+          done
+
+      - name: Record HEAD
+        id: state
+        run: |
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout synced main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Decide whether a release is needed
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+        run: |
+          set -euo pipefail
+          short="$(git rev-parse --short HEAD)"
+          echo "short_sha=$short" >> "$GITHUB_OUTPUT"
+          echo "tag=fork-$(date -u +%Y%m%d-%H%M%S)-$short" >> "$GITHUB_OUTPUT"
+          echo "upstream_base=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "needed=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Idempotent: skip if a release for this exact HEAD already exists.
+          if gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+              --json tagName --jq '.[].tagName' 2>/dev/null | grep -q -- "-$short\$"; then
+            echo "HEAD $short already released; skipping."
+            echo "needed=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.decide.outputs.needed == '1'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        if: steps.decide.outputs.needed == '1'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs
+
+      - name: Build release binaries
+        if: steps.decide.outputs.needed == '1'
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --bin codex -p codex-cli
+          cargo build --release --locked --bin codex-code-mode-host -p codex-code-mode-host
+
+      - name: Package standalone tarball
+        if: steps.decide.outputs.needed == '1'
+        id: package
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          pkg="codex-${TAG}-${TARGET_TRIPLE}"
+          mkdir -p "dist/${pkg}/bin"
+          cp codex-rs/target/release/codex "dist/${pkg}/bin/"
+          cp codex-rs/target/release/codex-code-mode-host "dist/${pkg}/bin/"
+          tar -C dist -czf "dist/${pkg}.tar.gz" "${pkg}"
+          ( cd dist && sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256" )
+          echo "artifact=dist/${pkg}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${pkg}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: steps.decide.outputs.needed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          SHORT: ${{ steps.decide.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          notes=$(cat <<EOF
+          Automated fork release built from this fork's \`main\` at commit \`${SHORT}\`,
+          which tracks the latest \`openai/codex\` main plus this fork's changes.
+
+          Target: \`${TARGET_TRIPLE}\`. Install/update locally with
+          \`fork-tools/codex-update.sh\` (or its systemd timer), which swaps
+          \`~/.codex/packages/standalone/current\` to this build.
+          EOF
+          )
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "$notes" \
+            "${{ steps.package.outputs.artifact }}" \
+            "${{ steps.package.outputs.checksum }}"
