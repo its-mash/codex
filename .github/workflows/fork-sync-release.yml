@@ -171,9 +171,13 @@ jobs:
           workspaces: codex-rs
           # Keep the (expensive) dependency compile even when a later step fails
           # — e.g. the rusty_v8 link — so the next run resumes warm instead of
-          # recompiling the whole workspace from scratch. This does NOT change the
-          # cache key, so it composes with caches earlier runs already saved.
+          # recompiling the whole workspace from scratch.
           cache-on-failure: true
+          # v2: drop the earlier cache that baked a per-run RUNNER_TEMP path for
+          # the rusty_v8 archive into the cached v8 build (stale path -> link
+          # failure on restore). The archive path is stabilized below so this
+          # key stays valid from here on.
+          prefix-key: fork-release-v2
 
       - name: Set up Codex-built rusty_v8
         # codex-code-mode-host links V8; the default rusty_v8 prebuilt archive is
@@ -183,6 +187,21 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ env.TARGET_TRIPLE }}
+
+      - name: Stabilize rusty_v8 archive path (cache-safe)
+        # setup-rusty-v8 places the archive under RUNNER_TEMP, which differs every
+        # run; the v8 crate bakes that path into its (cached) build output, so a
+        # restored cache points at a dead path. Copy to a fixed, run-independent
+        # location and re-export, so the cached v8 build stays valid across runs.
+        if: steps.decide.outputs.needed == '1'
+        run: |
+          set -euo pipefail
+          stable="$HOME/.fork-rusty-v8"
+          mkdir -p "$stable"
+          cp -f "$RUSTY_V8_ARCHIVE" "$stable/"
+          cp -f "$RUSTY_V8_SRC_BINDING_PATH" "$stable/"
+          echo "RUSTY_V8_ARCHIVE=$stable/$(basename "$RUSTY_V8_ARCHIVE")" >> "$GITHUB_ENV"
+          echo "RUSTY_V8_SRC_BINDING_PATH=$stable/$(basename "$RUSTY_V8_SRC_BINDING_PATH")" >> "$GITHUB_ENV"
 
       - name: Build release binaries
         if: steps.decide.outputs.needed == '1'
