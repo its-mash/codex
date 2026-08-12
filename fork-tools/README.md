@@ -35,6 +35,23 @@ manual work. Three moving parts:
 `rerere` is enabled in CI and locally, so a conflict you resolve once is replayed
 automatically the next time the same hunk conflicts.
 
+### Manually triggering a sync (no admin needed)
+
+`workflow_dispatch` needs repo-admin the fork token lacks, so to force an
+on-demand sync between scheduled ticks, bump the trigger file with `[sync]` in
+the commit message:
+
+```bash
+cd /home/benty/codex
+date >> .github/sync-trigger
+git commit -am "[sync] manual sync"
+git push origin main
+```
+
+The `[sync]` marker makes the push run the merge step (same code path as the
+scheduled cron); the trigger file is outside `paths-ignore` so the run actually
+starts. The scheduled every-6h run needs none of this.
+
 ### When a sync conflict is flagged
 
 You get a failed-run notification and an open issue. Resolve it on this machine:

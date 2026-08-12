@@ -1,0 +1,4 @@
+Bump this file (with [sync] in the commit message) to trigger an on-demand
+upstream sync, since workflow_dispatch needs repo-admin the fork token lacks.
+
+count: 1
