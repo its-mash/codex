@@ -32,7 +32,6 @@ concurrency:
 
 permissions:
   contents: write
-  issues: write
 
 env:
   UPSTREAM_URL: https://github.com/openai/codex.git
@@ -91,59 +90,36 @@ jobs:
             exit 1
           fi
 
-      - name: Open / refresh upstream-sync-conflict issue
+      - name: Report sync conflict (run summary + failed run = notification)
+        # The fork has Issues disabled and the token is not a repo admin, so the
+        # conflict alert is the failed scheduled-run email GitHub sends the owner,
+        # and the fix steps are written to the run summary. No Issues needed.
         if: failure() && steps.merge.outputs.conflict == '1'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
           BEHIND: ${{ steps.merge.outputs.behind }}
         run: |
-          set -euo pipefail
-          title="⚠️ Upstream sync conflict: resolve openai/codex merge"
-          body=$(cat <<EOF
-          The scheduled fork sync could not merge \`openai/codex\` main into this fork's \`main\`
-          because of conflicts, so auto-sync is paused until you resolve it locally.
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## ⚠️ Upstream sync conflict — auto-sync paused
 
-          **Conflicting files:** ${CONFLICTS:-<none reported>}
-          **Upstream commits behind:** ${BEHIND:-?}
+          The fork could not merge \`openai/codex\` main cleanly, so this run failed
+          (you get the failed-run email). Resolve it locally and the next run resumes.
 
-          ### Resolve locally, then auto-sync continues
+          - **Conflicting files:** ${CONFLICTS:-<none reported>}
+          - **Upstream commits behind:** ${BEHIND:-?}
+
+          ### Resolve locally
           \`\`\`bash
           cd /home/benty/codex
           git fetch upstream main            # remote 'upstream' -> openai/codex
           git merge upstream/main            # resolve the conflicts it reports
-          # ...edit files, then:
-          git add -A
-          git commit                          # completes the merge
-          git push origin main                # this push builds + publishes a release
+          git add -A && git commit           # completes the merge
+          git push origin main               # this push builds + publishes a release
           \`\`\`
-          rerere is enabled, so once you resolve a given conflict it is replayed
-          automatically on future syncs. This issue auto-closes on the next clean sync.
+          rerere is enabled, so a conflict you resolve once replays automatically
+          on future syncs.
           EOF
-          )
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --label upstream-sync-conflict --json number --jq '.[0].number' 2>/dev/null || true)"
-          gh label create upstream-sync-conflict --repo "$GITHUB_REPOSITORY" \
-            --color B60205 --description "Fork cannot merge openai/codex cleanly" 2>/dev/null || true
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
-              --body "Sync still blocked as of $(date -u +%FT%TZ). $body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
-              --label upstream-sync-conflict --body "$body"
-          fi
-
-      - name: Close stale conflict issue after a clean sync
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          for n in $(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --label upstream-sync-conflict --json number --jq '.[].number' 2>/dev/null); do
-            gh issue close "$n" --repo "$GITHUB_REPOSITORY" \
-              --comment "Fork synced cleanly at $(date -u +%FT%TZ); closing." || true
-          done
+          echo "::error::Upstream sync conflict in: ${CONFLICTS:-<none>} — see the run summary."
 
       - name: Record HEAD
         id: state
