@@ -188,6 +188,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-rs
+          # Keep the (expensive) dependency compile even when a later step fails
+          # — e.g. the rusty_v8 link — so the next run resumes warm instead of
+          # recompiling the whole workspace from scratch. This does NOT change the
+          # cache key, so it composes with caches earlier runs already saved.
+          cache-on-failure: true
 
       - name: Set up Codex-built rusty_v8
         # codex-code-mode-host links V8; the default rusty_v8 prebuilt archive is
