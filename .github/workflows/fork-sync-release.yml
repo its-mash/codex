@@ -58,7 +58,12 @@ jobs:
           git config rerere.enabled true
 
       - name: Merge latest openai/codex
-        if: github.event_name != 'push'
+        # Runs on schedule/dispatch. Also on a push whose commit message contains
+        # `[sync]`, which is the manual trigger when workflow_dispatch is not
+        # available (e.g. a non-admin token). Ordinary pushes skip the merge.
+        if: >-
+          github.event_name != 'push' ||
+          contains(github.event.head_commit.message, '[sync]')
         id: merge
         run: |
           set -euo pipefail
