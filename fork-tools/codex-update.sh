@@ -63,16 +63,6 @@ d=json.load(open(sys.argv[1]))
 print(d.get("tagName") or d.get("tag_name") or "")' "$STATE_DIR/.latest.json")"
 [[ -n "$latest_tag" ]] || fail "latest release has no tag; see $STATE_DIR/.latest.json"
 
-asset_url="$(python3 -c '
-import json,sys
-d=json.load(open(sys.argv[1])); triple=sys.argv[2]
-assets=d.get("assets") or []
-def name(a): return a.get("name","")
-def url(a):  return a.get("url") or a.get("browser_download_url") or a.get("apiUrl") or ""
-cands=[a for a in assets if name(a).endswith(".tar.gz") and triple in name(a)]
-print(url(cands[0]) if cands else "")' "$STATE_DIR/.latest.json" "$TARGET_TRIPLE")"
-asset_name="$(basename "${asset_url%%\?*}")"
-
 installed_tag=""
 [[ -f "$INSTALLED_MARKER" ]] && installed_tag="$(cat "$INSTALLED_MARKER")"
 # Fall back to reading the current symlink target if the marker is absent.
@@ -85,52 +75,49 @@ if [[ "$latest_tag" == "$installed_tag" ]]; then
   exit 0
 fi
 
-[[ -n "$asset_url" ]] || fail "release $latest_tag has no $TARGET_TRIPLE .tar.gz asset"
-
 log "updating: $installed_tag -> $latest_tag"
 
 # --- download ---------------------------------------------------------------
 tmp="$(mktemp -d "$STATE_DIR/.dl.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
-tarball="$tmp/$asset_name"
 
-# For a GitHub API asset URL, the octet-stream Accept header returns the binary.
-dl_headers=(-H "Accept: application/octet-stream")
-if command -v gh >/dev/null 2>&1 && [[ "$asset_url" == https://api.github.com/* ]]; then
-  gh api "$asset_url" --header "Accept: application/octet-stream" > "$tarball" 2>>"$LOG_FILE" ||
-    fail "asset download via gh failed"
+# gh release download resolves the tag, auth, redirects, and public/private
+# uniformly. The REST browser_download_url path is only for hosts without gh.
+if command -v gh >/dev/null 2>&1; then
+  gh release download "$latest_tag" --repo "$REPO_SLUG" \
+    --pattern "*-${TARGET_TRIPLE}.tar.gz" --pattern "*-${TARGET_TRIPLE}.tar.gz.sha256" \
+    --dir "$tmp" --clobber >>"$LOG_FILE" 2>&1 ||
+    fail "gh release download failed for $latest_tag"
 else
-  curl -fSL "${dl_headers[@]}" "$asset_url" -o "$tarball" 2>>"$LOG_FILE" ||
-    fail "asset download failed"
+  dl_url="$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1])); triple=sys.argv[2]
+for a in d.get("assets") or []:
+    n=a.get("name","")
+    if n.endswith(triple+".tar.gz"):
+        print(a.get("browser_download_url",""), n); break' "$STATE_DIR/.latest.json" "$TARGET_TRIPLE")"
+  url="${dl_url%% *}"; name="${dl_url##* }"
+  [[ -n "$url" ]] || fail "release $latest_tag has no $TARGET_TRIPLE .tar.gz asset"
+  curl -fSL "$url" -o "$tmp/$name" 2>>"$LOG_FILE" || fail "asset download failed"
+  curl -fSL "${url}.sha256" -o "$tmp/$name.sha256" 2>>"$LOG_FILE" || true
 fi
 
+tarball="$(ls "$tmp"/*-"${TARGET_TRIPLE}".tar.gz 2>/dev/null | head -1)"
+[[ -n "$tarball" && -s "$tarball" ]] || fail "downloaded tarball missing for $latest_tag"
+
 # --- verify checksum if the release ships one -------------------------------
-sum_url="$(python3 -c '
-import json,sys
-d=json.load(open(sys.argv[1])); want=sys.argv[2]+".sha256"
-for a in d.get("assets") or []:
-    if a.get("name")==want:
-        print(a.get("url") or a.get("browser_download_url") or ""); break' \
-  "$STATE_DIR/.latest.json" "$asset_name")"
-if [[ -n "$sum_url" ]]; then
-  if command -v gh >/dev/null 2>&1 && [[ "$sum_url" == https://api.github.com/* ]]; then
-    gh api "$sum_url" --header "Accept: application/octet-stream" > "$tmp/expected.sha256" 2>>"$LOG_FILE" || true
-  else
-    curl -fSL -H "Accept: application/octet-stream" "$sum_url" -o "$tmp/expected.sha256" 2>>"$LOG_FILE" || true
-  fi
-  if [[ -s "$tmp/expected.sha256" ]]; then
-    expected="$(awk '{print $1}' "$tmp/expected.sha256")"
-    actual="$(sha256sum "$tarball" | awk '{print $1}')"
-    [[ "$expected" == "$actual" ]] || fail "checksum mismatch for $asset_name (expected $expected, got $actual)"
-    log "checksum verified"
-  fi
+if [[ -s "$tarball.sha256" ]]; then
+  expected="$(awk '{print $1}' "$tarball.sha256")"
+  actual="$(sha256sum "$tarball" | awk '{print $1}')"
+  [[ "$expected" == "$actual" ]] || fail "checksum mismatch for $(basename "$tarball") (expected $expected, got $actual)"
+  log "checksum verified"
 fi
 
 # --- extract & install ------------------------------------------------------
 tar -xzf "$tarball" -C "$tmp" || fail "extract failed"
 # Tarball top dir is codex-<tag>-<triple>/bin/{codex,codex-code-mode-host}
 pkg_dir="$(find "$tmp" -maxdepth 1 -type d -name "codex-*-${TARGET_TRIPLE}" | head -1)"
-[[ -n "$pkg_dir" && -x "$pkg_dir/bin/codex" ]] || fail "unexpected package layout in $asset_name"
+[[ -n "$pkg_dir" && -x "$pkg_dir/bin/codex" ]] || fail "unexpected package layout in $(basename "$tarball")"
 
 dest="$RELEASES_DIR/$latest_tag-$TARGET_TRIPLE"
 rm -rf "$dest"
