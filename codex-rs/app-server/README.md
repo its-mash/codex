@@ -197,6 +197,9 @@ Example with notification opt-out:
 - `thread/name/set` — set or update a thread’s user-facing name for either a loaded thread or a persisted rollout; returns `{}` on success and emits `thread/name/updated` to initialized, opted-in clients. Thread names are not required to be unique; name lookups resolve to the most recently updated thread.
 - `thread/unarchive` — move an archived rollout file back into the sessions directory; returns the restored `thread` on success and emits `thread/unarchived`.
 - `thread/compact/start` — trigger conversation history compaction for a thread; returns `{}` immediately while progress streams through standard turn/item notifications.
+- `loop/create` — create a durable recurring prompt for a loaded thread.
+- `loop/list` — list a loaded thread's durable recurring prompts with cursor pagination.
+- `loop/delete` — stop and delete one durable recurring prompt.
 - `thread/shellCommand` — run a user-initiated `!` shell command against a thread; this runs unsandboxed with full access rather than inheriting the thread sandbox policy. Returns `{}` immediately while progress streams through standard turn/item notifications and any active turn receives the formatted output in its message stream.
 - `thread/backgroundTerminals/clean` — terminate all running background terminals for a thread (experimental; requires `capabilities.experimentalApi`); returns `{}` when the cleanup request is accepted.
 - `thread/backgroundTerminals/list` — list running background terminals for a loaded thread (experimental; requires `capabilities.experimentalApi`); returns `data` with the running terminal ids.
@@ -825,6 +828,33 @@ While compaction is running, the thread is effectively in a turn so clients shou
 ```json
 { "method": "thread/compact/start", "id": 25, "params": { "threadId": "thr_b" } }
 { "id": 25, "result": {} }
+```
+
+### Example: Manage durable loops
+
+`loop/create`, `loop/list`, and `loop/delete` control the same durable scheduler exposed to a thread's native automation tools. A fired loop enters through the thread's inter-agent mailbox and wakes an idle thread; clients do not need to start a model turn when creating or deleting it. Timestamps are Unix seconds. `loop/list` accepts optional `cursor` and `limit` fields and returns `nextCursor`.
+
+```json
+{ "method": "loop/create", "id": 26, "params": {
+  "threadId": "thr_b",
+  "prompt": "Reconcile the mock task board.",
+  "everySeconds": 900,
+  "name": "reconcile"
+} }
+{ "id": 26, "result": { "loop": {
+  "id": "0198...", "name": "reconcile", "prompt": "Reconcile the mock task board.",
+  "everySeconds": 900, "enabled": true, "createdAt": 1786450000,
+  "nextDueAt": 1786450900, "lastRunAt": null
+} } }
+
+{ "method": "loop/list", "id": 27, "params": {
+  "threadId": "thr_b", "cursor": null, "limit": 100
+} }
+{ "id": 27, "result": { "data": [ ... ], "nextCursor": null } }
+
+{ "method": "loop/delete", "id": 28, "params": {
+  "threadId": "thr_b", "id": "0198..."
+} }
 ```
 
 ### Example: Run a thread shell command

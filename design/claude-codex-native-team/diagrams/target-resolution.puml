@@ -1,0 +1,50 @@
+@startuml
+title Collaboration target resolution
+
+skinparam shadowing false
+
+start
+:Receive target string;
+
+if (Valid Thread UUID?) then (yes)
+  :ResolvedAgentTarget::Local(thread_id);
+  stop
+endif
+
+if (Starts with /root/ or equals /root?) then (yes)
+  :Resolve canonical local AgentPath;
+  if (Found?) then (yes)
+    :ResolvedAgentTarget::Local(thread_id);
+    stop
+  else (no)
+    :Return local target error;
+    stop
+  endif
+endif
+
+if (Starts with external:?) then (yes)
+  :Resolve exact name through ExternalTeamProvider;
+  if (Found?) then (yes)
+    :ResolvedAgentTarget::External(agent);
+    stop
+  else (no)
+    :Return external target error;
+    stop
+  endif
+endif
+
+:Try local relative/canonical resolution;
+if (Local found?) then (yes)
+  :ResolvedAgentTarget::Local(thread_id);
+  stop
+endif
+
+:Try external exact name/id resolution;
+if (External found?) then (yes)
+  :ResolvedAgentTarget::External(agent);
+  stop
+else (no)
+  :Return error listing unambiguous known targets;
+  stop
+endif
+@enduml

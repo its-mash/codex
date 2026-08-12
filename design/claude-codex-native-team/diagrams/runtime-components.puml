@@ -1,0 +1,88 @@
+@startuml
+title In-process Codex teammate components
+
+top to bottom direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "codex CLI/TUI" {
+  component "teammate subcommand" as TeammateCommand
+  component "normal TUI" as TUI
+  component "sibling Code Mode host" as CodeModeHost
+}
+
+package "app-server host" {
+  component "ExtensionRegistry" as Registry
+  component "ThreadManager" as ThreadManager
+}
+
+package "codex-core" {
+  component "CodexThread" as CodexThread
+  component "InputQueue" as InputQueue
+  component "AgentControl" as AgentControl
+  component "collaboration handlers" as Handlers
+}
+
+package "codex-extension-api" {
+  interface "ExternalTeamProvider" as ProviderApi
+  component "ExternalTeamHandle" as TeamHandle
+}
+
+package "codex-external-team" {
+  component "ExternalTeamExtension" as TeamExtension
+  component "ClaudeCodeProvider" as ClaudeProvider
+  component "DeliveryJournal" as Journal
+  component "TaskAdapter" as TaskAdapter
+}
+
+package "codex-automation" {
+  component "AutomationExtension" as AutomationExtension
+  component "SchedulerRuntime" as SchedulerRuntime
+  component "Unified-exec monitors" as MonitorRuntime
+  database "Durable automation JSON" as AutomationStore
+}
+
+TeammateCommand --> TUI : start with external_team config
+TUI --> CodexThread : ordinary user input and events
+TUI --> CodeModeHost : native Code Mode tools
+Registry --> TeamExtension : lifecycle/tool contributors
+Registry --> AutomationExtension : lifecycle/tool contributors
+Registry --> ThreadManager
+ThreadManager --> CodexThread
+TeamExtension --> ThreadManager : Weak<ThreadManager>
+TeamExtension --> TeamHandle : store in thread data
+TeamHandle --> ProviderApi
+ClaudeProvider ..|> ProviderApi
+TeamExtension --> ClaudeProvider
+ClaudeProvider --> Journal
+ClaudeProvider --> TaskAdapter
+
+ClaudeProvider --> CodexThread : submit Op::InterAgentCommunication
+CodexThread --> InputQueue
+Handlers --> TeamHandle : external resolution/delivery
+Handlers --> AgentControl : local resolution/delivery
+
+AutomationExtension --> ThreadManager : Weak<ThreadManager>
+AutomationExtension --> SchedulerRuntime
+SchedulerRuntime --> AutomationStore
+SchedulerRuntime --> CodexThread : scheduled InterAgentCommunication
+AutomationExtension --> MonitorRuntime
+MonitorRuntime --> CodexThread : poll existing unified-exec process
+MonitorRuntime --> CodexThread : monitor InterAgentCommunication
+
+note right of TeamExtension
+  Dormant unless external_team
+  is configured for the thread.
+end note
+
+note right of Handlers
+  Existing send_message,
+  followup_task, list_agents,
+  interrupt_agent.
+end note
+
+note right of CodeModeHost
+  Packaged beside codex and
+  required by current models.
+end note
+@enduml

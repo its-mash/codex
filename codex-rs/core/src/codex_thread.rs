@@ -6,6 +6,7 @@ use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
 use crate::session::TurnInput;
 use crate::session::session::Session;
+use crate::unified_exec::WriteStdinRequest;
 use crate::user_message_admission::PendingUserMessageAdmissionState;
 use crate::user_message_admission::UserMessageAdmission;
 use crate::user_message_admission::UserMessageAdmissionError;
@@ -44,6 +45,7 @@ use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsageInfo;
+use codex_protocol::protocol::TruncationPolicy;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::W3cTraceContext;
@@ -62,6 +64,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -219,6 +222,14 @@ pub struct BackgroundTerminalInfo {
     pub cwd: PathUri,
 }
 
+/// One non-writing poll of a unified-exec background terminal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackgroundTerminalPoll {
+    pub output: String,
+    pub process_id: Option<i32>,
+    pub exit_code: Option<i32>,
+}
+
 /// Conduit for the bidirectional stream of messages that compose a thread
 /// (formerly called a conversation) in Codex.
 impl CodexThread {
@@ -242,6 +253,33 @@ impl CodexThread {
 
     pub async fn submit(&self, op: Op) -> CodexResult<String> {
         self.io.submit(op).await
+    }
+
+    /// Polls an existing unified-exec process without creating a command or writing input.
+    pub async fn poll_background_terminal(
+        &self,
+        process_id: i32,
+        wait: Duration,
+    ) -> Result<BackgroundTerminalPoll, String> {
+        let output = self
+            .session
+            .services
+            .unified_exec_manager
+            .write_stdin(WriteStdinRequest {
+                process_id,
+                input: "",
+                yield_time_ms: wait.as_millis().try_into().unwrap_or(u64::MAX),
+                max_output_tokens: Some(4_096),
+                truncation_policy: TruncationPolicy::Bytes(64 * 1024),
+                interaction_event: None,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(BackgroundTerminalPoll {
+            output: String::from_utf8_lossy(&output.raw_output).into_owned(),
+            process_id: output.process_id,
+            exit_code: output.exit_code,
+        })
     }
 
     /// Returns the session telemetry handle for thread-scoped production instrumentation.

@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "LoopAutomation": {
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "everySeconds": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastRunAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "nextDueAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "enabled",
+        "everySeconds",
+        "id",
+        "name",
+        "nextDueAt",
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "loop": {
+      "$ref": "#/definitions/LoopAutomation"
+    }
+  },
+  "required": [
+    "loop"
+  ],
+  "title": "LoopDeleteResponse",
+  "type": "object"
+}

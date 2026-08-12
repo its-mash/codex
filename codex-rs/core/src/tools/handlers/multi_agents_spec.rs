@@ -14,6 +14,12 @@ use std::collections::BTreeMap;
 pub const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessageArgumentEncoding {
+    Encrypted,
+    Plaintext,
+}
+
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str = "Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.";
 const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
@@ -183,7 +189,14 @@ pub fn create_send_input_tool_v1() -> ToolSpec {
     })
 }
 
-pub fn create_send_message_tool() -> ToolSpec {
+pub(crate) fn create_send_message_tool(encoding: MessageArgumentEncoding) -> ToolSpec {
+    let message_schema = JsonSchema::string(Some(
+        "Message text to queue on the target agent.".to_string(),
+    ));
+    let message_schema = match encoding {
+        MessageArgumentEncoding::Encrypted => message_schema.with_encrypted(),
+        MessageArgumentEncoding::Plaintext => message_schema,
+    };
     let properties = BTreeMap::from([
         (
             "target".to_string(),
@@ -191,13 +204,7 @@ pub fn create_send_message_tool() -> ToolSpec {
                 "Relative or canonical task name to message (from spawn_agent).".to_string(),
             )),
         ),
-        (
-            "message".to_string(),
-            JsonSchema::string(Some(
-                "Message text to queue on the target agent.".to_string(),
-            ))
-            .with_encrypted(),
-        ),
+        ("message".to_string(), message_schema),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
@@ -215,7 +222,14 @@ pub fn create_send_message_tool() -> ToolSpec {
     })
 }
 
-pub fn create_followup_task_tool() -> ToolSpec {
+pub(crate) fn create_followup_task_tool(encoding: MessageArgumentEncoding) -> ToolSpec {
+    let message_schema = JsonSchema::string(Some(
+        "Message text to send to the target agent.".to_string(),
+    ));
+    let message_schema = match encoding {
+        MessageArgumentEncoding::Encrypted => message_schema.with_encrypted(),
+        MessageArgumentEncoding::Plaintext => message_schema,
+    };
     let properties = BTreeMap::from([
         (
             "target".to_string(),
@@ -224,13 +238,7 @@ pub fn create_followup_task_tool() -> ToolSpec {
                     .to_string(),
             )),
         ),
-        (
-            "message".to_string(),
-            JsonSchema::string(Some(
-                "Message text to send to the target agent.".to_string(),
-            ))
-            .with_encrypted(),
-        ),
+        ("message".to_string(), message_schema),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {

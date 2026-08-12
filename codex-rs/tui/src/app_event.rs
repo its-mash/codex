@@ -204,6 +204,12 @@ pub(crate) enum AppEvent {
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
 
+    /// Execute a durable loop operation directly through app-server.
+    LoopCommand {
+        thread_id: ThreadId,
+        action: crate::loop_command::LoopCommandAction,
+    },
+
     /// Fork the current thread into a transient side conversation.
     StartSide {
         parent_thread_id: ThreadId,

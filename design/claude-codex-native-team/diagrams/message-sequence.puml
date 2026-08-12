@@ -1,0 +1,60 @@
+@startuml
+title Native teammate communication and lifecycle
+
+skinparam shadowing false
+
+actor Operator
+participant "Claude lead" as Lead
+database "Claude team store" as Store
+participant "Claude provider" as Provider
+participant "External-team extension" as Extension
+participant "Codex thread" as Codex
+participant "Codex TUI" as TUI
+
+Lead -> Store : create roster entry and initial assignment
+Lead -> Provider : launch via teammate command argv
+Provider -> Store : resolve identity, parent, assignment
+Provider -> Extension : ExternalMessage(NEW_TASK)
+Extension -> Codex : Op::InterAgentCommunication(trigger_turn=true)
+Codex -> Codex : queue mailbox and start native turn
+Codex -> TUI : stream agent/tool events
+
+Operator -> TUI : optional direct text
+TUI -> Codex : TurnInput::UserInput
+
+Lead -> Store : SendMessage(correction)
+Store -> Provider : filesystem event/reconciliation
+Provider -> Provider : validate and skip journaled ID
+Provider -> Extension : ExternalMessage(MESSAGE)
+Extension -> Codex : Op::InterAgentCommunication(trigger_turn=true)
+Codex --> Extension : submission accepted
+Extension -> Provider : journal message ID
+
+alt Codex is working
+  Codex -> Codex : deliver at native mailbox boundary
+else Codex is idle
+  Codex -> Codex : start native turn
+end
+
+Codex -> Extension : send_message(target=team-lead)
+Extension -> Provider : provider.send_message
+Provider -> Store : append native Claude envelope
+Store -> Lead : native automatic delivery
+
+Codex -> Extension : final turn item and idle lifecycle
+Extension -> Provider : final result + idle notification
+Provider -> Store : verified native envelopes
+Store -> Lead : result and idle event
+
+Lead -> Store : shutdown request / remove roster entry
+Store -> Provider : lifecycle event
+Provider -> Provider : validate request + parent authority
+Provider -> Store : matching shutdown_response
+Provider -> Codex : Op::Shutdown
+Codex -> TUI : terminated
+
+note right of Provider
+  Claude inbox records remain owned by Claude.
+  Codex does not mark or drain them.
+end note
+@enduml

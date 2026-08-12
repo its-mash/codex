@@ -989,6 +989,9 @@ impl App {
             AppEvent::OpenThreadGoalMenu { thread_id } => {
                 self.open_thread_goal_menu(app_server, thread_id).await;
             }
+            AppEvent::LoopCommand { thread_id, action } => {
+                self.run_loop_command(app_server, thread_id, action).await;
+            }
             AppEvent::OpenThreadGoalEditor { thread_id } => {
                 self.open_thread_goal_editor(app_server, thread_id).await;
             }

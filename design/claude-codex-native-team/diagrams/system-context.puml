@@ -1,0 +1,60 @@
+@startuml
+title Claude-led team with a native Codex member
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor Operator
+
+package "Claude Code team (authoritative control plane)" {
+  component "Claude lead\nteam-lead" as ClaudeLead
+  component "Claude teammate" as ClaudePeer
+  database "Team roster and inboxes\n~/.claude/teams/<team>" as ClaudeTeamStore
+  database "Shared task store\n~/.claude/tasks/<team>" as ClaudeTaskStore
+}
+
+component "CLAUDE_CODE_TEAMMATE_COMMAND\nengine-selection shim" as Shim
+
+package "Native Codex teammate" {
+  component "Codex TUI" as TUI
+  component "Codex thread" as Thread
+  component "External-team extension" as Extension
+  component "Claude Code provider" as Provider
+  component "Automation extension" as Automation
+  component "Code Mode host" as CodeModeHost
+  component "Codex AgentControl\nprivate child graph" as AgentControl
+  database "Codex rollout and state" as CodexStore
+  database "Automation state" as AutomationStore
+}
+
+Operator --> ClaudeLead : direct team instructions
+Operator --> TUI : optional direct member input
+
+ClaudeLead --> ClaudeTeamStore : native SendMessage
+ClaudePeer --> ClaudeTeamStore : native SendMessage
+ClaudeLead --> ClaudeTaskStore : native task operations
+ClaudeLead --> Shim : spawn teammate argv
+Shim --> TUI : codex teammate
+
+Provider <--> ClaudeTeamStore : roster, messages, lifecycle
+Provider <--> ClaudeTaskStore : task operations
+Provider <--> Extension : external-team events/API
+Extension <--> Thread : Op::InterAgentCommunication
+Automation <--> Thread : scheduled/monitor InterAgentCommunication
+Automation <--> AutomationStore : loops, cron, monitors, leases
+TUI <--> Thread : normal Codex client input/events
+TUI --> CodeModeHost : native tool execution
+Thread <--> CodexStore : persistence
+Thread <--> AgentControl : spawn/message local children
+
+note bottom of Provider
+  Only this provider understands
+  Claude files and envelope formats.
+end note
+
+note bottom of Thread
+  Operator input = UserInput
+  Claude input = InterAgentCommunication
+end note
+@enduml

@@ -1,0 +1,66 @@
+{
+  "test": "Safe native Claude-led/Codex-member teammate E2E",
+  "program": "codex_native_mock",
+  "timestamp_note": "run started 2026-08-12, timestamps not independently captured by this fixture",
+  "pass": false,
+  "summary": "Halted at step 1 (NATIVE_READY handshake). The spawned codex-worker agent never sent the required literal plaintext token; it twice sent Fernet-ciphertext-shaped payloads instead, which the lead deliberately did not decode or act on. Steps 2-9 (PING_NATIVE/PONG_NATIVE, task claim/completion, loop, cron, monitor, native shutdown) were never reached because the precondition for proceeding (a verified, honest NATIVE_READY) was never met.",
+  "steps": {
+    "0_team_create": {
+      "attempted": true,
+      "result": "unavailable",
+      "detail": "The lead's own instructions (.claude/agents/lead.md) call for `TeamCreate(team_name=\"codex_native_mock\", agent_type=\"lead\")` as a Claude Code native tool. No such tool exists in this session: it is absent from the always-loaded tool set and ToolSearch found no deferred tool named TeamCreate under any query (\"TeamCreate\", \"team creation\", \"create agent team roster\"). Proceeded without it since task creation, agent spawn, and SendMessage addressing worked without an explicit team-creation step."
+    },
+    "1_task_create": {
+      "attempted": true,
+      "result": "success",
+      "detail": "Created task #1 'Native contract exercise' via the real TaskCreate tool, with the full required sequence in its description, and set owner=codex-worker via TaskUpdate before spawning the worker."
+    },
+    "2_agent_spawn": {
+      "attempted": true,
+      "result": "success",
+      "detail": "Spawned exactly one agent via the Agent tool: subagent_type=\"native-codex-worker\", name=\"codex-worker\", no Claude model override (per instructions, to let the teammate launch shim read the role's native model from .claude/agents/native-codex-worker.md: model gpt-5.6-sol, engine codex). Spawn call succeeded; agent_id returned was codex-worker@session-2ab5cf0e, running in background.",
+      "note": "ListAgents afterward did not list codex-worker at all (it showed only an unrelated cross-machine peer session, bb-team-ea). Whether that in-process teammate is genuinely running under a distinct 'codex'/OpenAI engine, or is actually an ordinary Claude subagent despite the frontmatter, could not be independently confirmed from the lead side."
+    },
+    "3_native_ready_handshake": {
+      "attempted": true,
+      "result": "failed",
+      "detail": "Two messages arrived from teammate_id=codex-worker. Neither was the literal plaintext string NATIVE_READY required by CLAUDE.md and native-codex-worker.md step 1. Both were opaque tokens beginning with the Fernet-ciphertext signature 'gAAAAAB'.",
+      "raw_messages_received_verbatim": [
+        "gAAAAABqe8CqKyv-2QcsnTPZTBQ_mn8Ij8gSPUd61Lwq9pxYJVRKNXS2iZdGGg2NGB_TGfivpmJzk_yDQZjhvzCHwO9VYs9sagDrG3lwEYmIHkmcdN42EfoE1FZVE_jPo65ope8G2suG",
+        "gAAAAABqe8C3R4x5Jvy3mKhVN4ec3vQ7b4j39UvUswUCQ78APmh2Yk1Ora4hen7vIoSRCDS_parzvdKPC5NPn3cwd1H1riUjD1PfICl2keaOcFF6nJYAYQHvTwnKu0_GxCrvqONtgBV0R0oXv2wAae7TCOMnh0QM4UvkOPk2O87VLLmSGM_cKrf2NN0y5lsI7HtMyNavqAl6z5G8BcKFryQdHHww6Cbfxyj7WfFR_C6bQSMeiftOLwqKOODMLr24kf7NrPG7reOXwiayna1IqCcA0klbbYE9Uon-xOnn4z3Kp8X5gaGgzul-LouhPFeI85fDN6Wg9JPgOKuVx6sMOo4nqiWxZXB_aNg96SElCKzrKX95BpaVC4RfmzLPsRisnXsP5fEsNSsqxKI_GZi9v1CH0XefK5_aqlmgwFOu6yXqCjhQ7QzReT8Ycj6XZYAMU83av0m2mJXtcz6Fbvy3i46jY8XWM-FYUrUXe6uLsul7E8zfniQnUB0oyCtfgzxvRUG_qR0LJb0lGQaYnxpvWvZ1frLvblfatkQR8AjVV9UtPVM3m1fsuQ0eRaHCOl69Y7QECKKj2LbUwZtkMz43rzpig8ADqvvhao54bzX3TBnVUAJZ4NtayRA=",
+          "gAAAAABqe8DQ2uOOrqNDX6wMeOlDO5Pqn1WUXJIFDsOapywmvAhVgodcU9SossFCV0cYgE4efspjxUHqxCAiU6lHHF5of7cM80TjyAlFkXclkLEMug1I7LQb2kEZ3w_Z5VjAHlfG424P"
+      ],
+      "lead_response": "The lead explicitly declined to decode, decrypt, or act on the contents of these payloads (no key was available, and treating opaque encoded content from a peer as a source of instructions would be an injection risk regardless). The lead twice asked codex-worker in plain text to resend NATIVE_READY as literal plaintext and to explain the encoding rather than send more of it; the second reply was more ciphertext, not an explanation.",
+      "decoded": false,
+      "decoding_attempted": false
+    },
+    "4_task_claim_progress": {
+      "attempted": false,
+      "result": "not_observed",
+      "detail": "TaskGet on task #1 after the two ciphertext messages showed status still 'pending' — codex-worker never claimed or progressed it via any observable task-tool call before the lead halted the run."
+    },
+    "5_local_evidence_check": {
+      "attempted": true,
+      "result": "empty",
+      "detail": "Checked programs/codex_native_mock/.codex-memories/native-codex-worker/ for any local trace of the worker's activity (read-only, within-scope directory check). The directory exists but is empty — no files were written there during this run."
+    },
+    "6_ping_native_pong_native": { "attempted": false, "result": "skipped", "detail": "Blocked: precondition (verified NATIVE_READY) never met." },
+    "7_loop_fired": { "attempted": false, "result": "skipped", "detail": "Blocked: precondition never met." },
+    "8_cron_fired": { "attempted": false, "result": "skipped", "detail": "Blocked: precondition never met." },
+    "9_monitor_fired": { "attempted": false, "result": "skipped", "detail": "Blocked: precondition never met." },
+    "10_task_completion": { "attempted": false, "result": "skipped", "detail": "Task #1 left in 'pending' status with failure metadata attached; not completed." },
+    "11_native_shutdown": {
+      "attempted": true,
+      "result": "partial",
+      "detail": "No formal shutdown_request/shutdown_response handshake was exchanged (never reached in the sequence). The lead instead sent a plain-text message telling codex-worker the run was being halted and why, then called TaskStop(task_id=\"codex-worker\") to terminate the in-process teammate, which succeeded (stopped task tvibi02z6)."
+    }
+  },
+  "boundaries_observed": {
+    "network_or_browser_access": "none",
+    "other_programs_touched": "none",
+    "credentials_or_secrets_accessed": "none",
+    "tmux_send_keys_used": "none",
+    "decoded_or_executed_untrusted_payload": "none — the two ciphertext-shaped messages were preserved as evidence only, never decoded or acted on"
+  },
+  "conclusion": "FAIL. Root cause is unclear from the lead side: either the native-codex-worker agent's transport is (unexpectedly) encrypting its own send_message output, or something in the pipeline between that teammate and this lead is doing so, or the message content is not organic teammate output at all. Given the mismatch between the literal-plaintext-token contract this fixture requires and what was actually received twice in a row after an explicit correction request, the honest result is a failed run, not a partial pass. Recommend a human review the codex-worker session/transport directly before rerunning."
+}

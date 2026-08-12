@@ -70,6 +70,8 @@ where
         queue_store,
     } = dependencies;
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
+    codex_automation::install(&mut builder, thread_manager.clone());
+    codex_external_team::install(&mut builder, thread_manager.clone());
     if let Some(queue) = queue_store {
         let queue_service = Arc::new(codex_queue_extension::QueuedItemService::new(
             queue,

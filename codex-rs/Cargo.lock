@@ -2001,6 +2001,7 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-app-server-transport",
  "codex-arg0",
+ "codex-automation",
  "codex-backend-client",
  "codex-chatgpt",
  "codex-cloud-config",
@@ -2013,6 +2014,7 @@ dependencies = [
  "codex-exec-server",
  "codex-extension-api",
  "codex-external-agent-migration",
+ "codex-external-team",
  "codex-features",
  "codex-feedback",
  "codex-file-search",
@@ -2282,6 +2284,25 @@ dependencies = [
  "pretty_assertions",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "codex-automation"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "codex-core",
+ "codex-extension-api",
+ "codex-protocol",
+ "codex-utils-string",
+ "cron",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3150,6 +3171,25 @@ dependencies = [
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tracing",
+]
+
+[[package]]
+name = "codex-external-team"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "codex-core",
+ "codex-extension-api",
+ "codex-protocol",
+ "codex-utils-string",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -5068,6 +5108,18 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "cron"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5dcd6f69605c2956916ce24e8af637b754964c9a83f4662d3a2361654cdba09"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "phf",
+ "winnow",
+]
 
 [[package]]
 name = "crossbeam-channel"

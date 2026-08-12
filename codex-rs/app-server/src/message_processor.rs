@@ -1161,6 +1161,13 @@ impl MessageProcessor {
                     .thread_compact_start(&request_id, params)
                     .await
             }
+            ClientRequest::LoopCreate { params, .. } => {
+                self.thread_processor.loop_create(params).await
+            }
+            ClientRequest::LoopList { params, .. } => self.thread_processor.loop_list(params).await,
+            ClientRequest::LoopDelete { params, .. } => {
+                self.thread_processor.loop_delete(params).await
+            }
             ClientRequest::ThreadBackgroundTerminalsClean { params, .. } => {
                 self.thread_processor
                     .thread_background_terminals_clean(&request_id, params)

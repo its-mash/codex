@@ -1,0 +1,6 @@
+---
+source: tui/src/app/loop_actions_tests.rs
+expression: format_loop_list(&loops)
+---
+Durable loops:
+- `review` (loop-1) every 15m; next Unix 2 — Review the fixture.

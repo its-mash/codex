@@ -1471,6 +1471,38 @@ impl App {
         (active_thread_id != primary_thread_id).then_some((active_thread_id, primary_thread_id))
     }
 
+    /// Returns the primary thread id when an externally managed teammate has been shut down.
+    ///
+    /// External team shutdown originates in the provider lifecycle rather than from a TUI exit
+    /// action. Closing the primary thread must therefore also close the teammate process; leaving
+    /// an interactive prompt behind would keep Claude's teammate slot alive after it acknowledged
+    /// shutdown.
+    pub(super) fn external_team_shutdown_exit_thread(
+        &self,
+        notification: &ServerNotification,
+    ) -> Option<ThreadId> {
+        let closed_thread_id = match notification {
+            ServerNotification::ThreadClosed(closed) => &closed.thread_id,
+            ServerNotification::ThreadStatusChanged(changed)
+                if matches!(
+                    changed.status,
+                    codex_app_server_protocol::ThreadStatus::NotLoaded
+                ) =>
+            {
+                &changed.thread_id
+            }
+            _ => return None,
+        };
+        if self.config.external_team.is_none() {
+            return None;
+        }
+        let active_thread_id = self.active_thread_id?;
+        let primary_thread_id = self.primary_thread_id?;
+        (active_thread_id == primary_thread_id
+            && *closed_thread_id == primary_thread_id.to_string())
+        .then_some(primary_thread_id)
+    }
+
     pub(super) fn replay_thread_snapshot(
         &mut self,
         snapshot: ThreadEventSnapshot,
@@ -1643,6 +1675,11 @@ impl App {
                 if matches!(notification.as_ref(), ServerNotification::ThreadClosed(_))
         ) && self.pending_shutdown_exit_thread_id
             == self.active_thread_id;
+        let external_team_shutdown_completed = matches!(
+            &event,
+            ThreadBufferedEvent::Notification(notification)
+                if self.external_team_shutdown_exit_thread(notification.as_ref()).is_some()
+        );
 
         // Processing order matters:
         //
@@ -1687,6 +1724,9 @@ impl App {
             self.pending_shutdown_exit_thread_id = None;
         }
         self.handle_thread_event_now(event);
+        if external_team_shutdown_completed {
+            self.app_event_tx.send(AppEvent::Exit(ExitMode::Immediate));
+        }
         if self.backtrack_render_pending {
             tui.frame_requester().schedule_frame();
         }

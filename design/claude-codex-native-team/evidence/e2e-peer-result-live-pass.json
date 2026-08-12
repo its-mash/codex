@@ -1,0 +1,155 @@
+{
+  "fixture": "codex_native_mock",
+  "acceptance": "three-agent peer messaging test",
+  "date": "2026-08-12",
+  "lead_role": "lead-peer",
+  "team": {
+    "name": "session-bf0bf5aa",
+    "note": "Claude Code 2.1.228 does not expose TeamCreate; the implicit native team was created on the first background Agent call, per programs/codex_native_mock/CLAUDE.md.",
+    "members": {
+      "codex-worker": {
+        "subagent_type": "native-codex-peer-worker",
+        "final_agent_id": "codex-worker@session-bf0bf5aa",
+        "spawn_history": [
+          {"attempt": 1, "outcome": "no response observed (operator reported a rate-limit model-switch dialog consumed its startup turn, then a quota exhaustion on the follow-up model)", "action_taken": "TaskStop task_id=tseuzpslk, then respawned"},
+          {"attempt": 2, "outcome": "no response observed (operator reported a wire-API mismatch in the launcher)", "action_taken": "TaskStop task_id=tx1551s0x, then respawned"},
+          {"attempt": 3, "outcome": "reported NATIVE_READY successfully; used for the remainder of the test", "action_taken": "none — this instance completed the acceptance sequence"}
+        ]
+      },
+      "claude-peer": {
+        "subagent_type": "claude-peer",
+        "final_agent_id": "claude-peer@session-bf0bf5aa",
+        "spawn_history": [
+          {"attempt": 1, "outcome": "reported CLAUDE_READY immediately"}
+        ]
+      }
+    }
+  },
+  "CAVEAT_model_identity_unverified": {
+    "summary": "codex-worker's claimed underlying model changed repeatedly across a sequence of operator notes (gpt-5.6-sol -> gpt-5.6-luna -> cc/claude-sonnet-5 routed through a 'local Responses shim and 9router'), and mid-run the fixture's own CLAUDE.md was edited on disk to assert the role's model is cc/claude-sonnet-5 'while the member remains the full native Codex runtime.'",
+    "concern": "That claim is not independently verifiable by the lead (no tool exposes the actual backing model of a spawned teammate), and 'remains the full native Codex runtime' while backed by a different vendor's model is not a coherent technical claim. The escalating chain of unfalsifiable excuses for codex-worker's failures, combined with a live edit to the file defining this test's acceptance criteria, is consistent with either a genuinely flaky local environment or an attempt to launder a Claude-backed process as satisfying the native-OpenAI-Codex leg of this test.",
+    "operator_decision": "Flagged to the operator via AskUserQuestion mid-run. Operator chose: 'Proceed, flag as caveat' — continue the test with this codex-worker instance, but do not represent its output as a verified genuine-native-OpenAI pass.",
+    "conclusion": "All protocol-level steps below were observed exactly as specified through native message contracts. Whether the 'codex-worker' identity in this run was genuinely native OpenAI/Codex end-to-end, as opposed to a Claude-backed substitute per the operator's claim, is UNVERIFIED by the lead and should not be read as confirmed."
+  },
+  "observed_sequence": [
+    {
+      "step": "CLAUDE_READY",
+      "direction": "claude-peer -> lead",
+      "content": "CLAUDE_READY",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"claude-peer\"> exact text CLAUDE_READY, idle_notification timestamp 2026-08-12T06:51:40.973Z"
+    },
+    {
+      "step": "NATIVE_READY",
+      "direction": "codex-worker -> lead",
+      "content": "NATIVE_READY",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"codex-worker\"> exact text NATIVE_READY (3rd spawn instance, after two respawns), idle_notification timestamp 2026-08-12T07:11:00.102Z. Subject to CAVEAT_model_identity_unverified above."
+    },
+    {
+      "step": "START_PEER_PING",
+      "direction": "lead -> claude-peer",
+      "content": "START_PEER_PING",
+      "observed": true,
+      "evidence": "SendMessage msg_id=8c616707-b719-42c2-9b97-150c253fcaf6"
+    },
+    {
+      "step": "PEER_PING_CLAUDE",
+      "direction": "claude-peer -> codex-worker",
+      "content": "PEER_PING_CLAUDE",
+      "observed": true,
+      "evidence": "Direct member-to-member send, not relayed by lead. Observed by lead only as idle_notification metadata: summary=\"[to codex-worker] PEER_PING_CLAUDE\", timestamp 2026-08-12T07:15:15.532Z"
+    },
+    {
+      "step": "PEER_PONG_CODEX",
+      "direction": "codex-worker -> claude-peer",
+      "content": "PEER_PONG_CODEX",
+      "observed": true,
+      "evidence": "Direct member-to-member send, not relayed by lead. codex-worker self-reported to lead: \"PEER_PONG_CODEX sent directly to claude-peer. Waiting for further instructions.\" idle_notification timestamp 2026-08-12T07:31:02.711Z. Required two lead nudges (msg_id=19ce5368-b1ba-48c1-8fdb-8816fe058a0b, msg_id=63796684-d91c-4790-ac89-768b5ccb62e2) after transient-failure operator notes before this landed."
+    },
+    {
+      "step": "PEER_PONG_SEEN:PEER_PONG_CODEX",
+      "direction": "claude-peer -> lead",
+      "content": "PEER_PONG_SEEN:PEER_PONG_CODEX",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"claude-peer\"> exact text PEER_PONG_SEEN:PEER_PONG_CODEX, idle_notification timestamp 2026-08-12T07:31:09.478Z. Confirms claude-peer's direct PEER_PING_CLAUDE reached codex-worker and codex-worker's direct PEER_PONG_CODEX reply reached claude-peer without passing through the lead."
+    },
+    {
+      "step": "START_CODEX_PEER_PING",
+      "direction": "lead -> codex-worker",
+      "content": "START_CODEX_PEER_PING",
+      "observed": true,
+      "evidence": "SendMessage msg_id=28a744cb-630b-4349-b214-6ef67a9abfd0"
+    },
+    {
+      "step": "CODEX_PEER_PING",
+      "direction": "codex-worker -> claude-peer",
+      "content": "CODEX_PEER_PING",
+      "observed": true,
+      "evidence": "Direct member-to-member send, not relayed by lead. codex-worker self-reported to lead: \"CODEX_PEER_PING sent directly to claude-peer. Waiting for its reply.\" idle_notification timestamp 2026-08-12T07:40:04.186Z"
+    },
+    {
+      "step": "CODEX_PEER_PING_SEEN",
+      "direction": "claude-peer -> lead",
+      "content": "CODEX_PEER_PING_SEEN",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"claude-peer\"> exact text CODEX_PEER_PING_SEEN"
+    },
+    {
+      "step": "CLAUDE_PEER_PONG",
+      "direction": "claude-peer -> codex-worker",
+      "content": "CLAUDE_PEER_PONG",
+      "observed": true,
+      "evidence": "Direct member-to-member send, not relayed by lead. Observed by lead only as idle_notification metadata: summary=\"[to codex-worker] CLAUDE_PEER_PONG\", timestamp 2026-08-12T07:40:09.088Z"
+    },
+    {
+      "step": "PEER_REPLY_SEEN:CLAUDE_PEER_PONG",
+      "direction": "codex-worker -> lead",
+      "content": "PEER_REPLY_SEEN:CLAUDE_PEER_PONG",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"codex-worker\"> exact text PEER_REPLY_SEEN:CLAUDE_PEER_PONG, plus \"Reported PEER_REPLY_SEEN:CLAUDE_PEER_PONG to the lead. Waiting for further instructions.\" idle_notification timestamp 2026-08-12T07:40:11.722Z. Together with CODEX_PEER_PING_SEEN, confirms codex-worker's direct CODEX_PEER_PING reached claude-peer and claude-peer's direct CLAUDE_PEER_PONG reply reached codex-worker without passing through the lead."
+    },
+    {
+      "step": "PING_NATIVE",
+      "direction": "lead -> codex-worker",
+      "content": "PING_NATIVE",
+      "observed": true,
+      "evidence": "SendMessage msg_id=907286b0-e539-47e6-897b-66965538d733"
+    },
+    {
+      "step": "PONG_NATIVE",
+      "direction": "codex-worker -> lead",
+      "content": "PONG_NATIVE",
+      "observed": true,
+      "evidence": "<teammate-message teammate_id=\"codex-worker\"> exact text PONG_NATIVE; followed by \"PONG_NATIVE sent to the lead. Waiting for further instructions.\" idle_notification timestamp 2026-08-12T07:40:28.948Z"
+    }
+  ],
+  "shutdown": {
+    "codex_worker": {
+      "request": {
+        "type": "shutdown_request",
+        "requested_id_by_lead": "e2e-peer-codex-shutdown-001",
+        "system_assigned_request_id": "shutdown-1786520433083@codex-worker",
+        "reason": "Peer-messaging acceptance sequence complete; shutting down codex-worker cleanly.",
+        "note": "The SendMessage tool overrode the lead-supplied request_id with its own auto-generated ID; the auto-generated ID is the one that must match (and did match) the response."
+      },
+      "response": {
+        "type": "shutdown_response",
+        "request_id": "shutdown-1786520433083@codex-worker",
+        "approve": true,
+        "reason": "Codex teammate acknowledged the native shutdown request.",
+        "request_id_matches": true
+      },
+      "member_removed": true,
+      "removal_evidence": "TaskStop task_id=t7t7lmet7, success"
+    },
+    "claude_peer": {
+      "method": "normal teammate stop mechanism (TaskStop)",
+      "stopped": true,
+      "removal_evidence": "TaskStop task_id=t74gjhzf7, success"
+    }
+  },
+  "pass": true,
+  "pass_basis": "Every specified native-contract message in the acceptance sequence (NATIVE_READY, CLAUDE_READY, both peer round trips sent/received directly member-to-member and reported to the lead without lead relay, PING_NATIVE/PONG_NATIVE, and the structured shutdown request/response with matching IDs and approve:true) was directly observed with concrete evidence, and both members were torn down cleanly through their respective native mechanisms.",
+  "pass_caveat": "This 'pass' certifies the PROTOCOL-LEVEL peer-messaging contract only. It does NOT certify that codex-worker was genuinely backed by a native OpenAI/Codex model throughout — see CAVEAT_model_identity_unverified. That specific claim is unverified and was proceeded on per explicit operator instruction, not lead confirmation."
+}

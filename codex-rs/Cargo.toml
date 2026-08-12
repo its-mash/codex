@@ -54,8 +54,10 @@ members = [
     "exec-server/tests/support",
     "execpolicy",
     "ext/agent",
+    "ext/automation",
     "ext/connectors",
     "ext/extension-api",
+    "ext/external-team",
     "ext/goal",
     "ext/git-attribution",
     "ext/guardian",
@@ -163,6 +165,7 @@ codex-app-server-protocol-noop-macros = { path = "app-server-protocol-noop-macro
 codex-app-server-test-client = { path = "app-server-test-client" }
 codex-apply-patch = { path = "apply-patch" }
 codex-arg0 = { path = "arg0" }
+codex-automation = { path = "ext/automation" }
 codex-async-utils = { path = "async-utils" }
 codex-backend-client = { path = "backend-client" }
 codex-chatgpt = { path = "chatgpt" }
@@ -194,6 +197,7 @@ codex-exec-server = { path = "exec-server" }
 codex-exec-server-test-support = { path = "exec-server/tests/support" }
 codex-execpolicy = { path = "execpolicy" }
 codex-extension-api = { path = "ext/extension-api" }
+codex-external-team = { path = "ext/external-team" }
 codex-extension-items = { path = "ext/items" }
 codex-goal-extension = { path = "ext/goal" }
 codex-git-attribution = { path = "ext/git-attribution" }
@@ -301,6 +305,7 @@ bm25 = "2.3.2"
 bytes = "1.10.1"
 chardetng = "0.1.17"
 chrono = "0.4.43"
+cron = "0.17.0"
 clap = "4"
 clap_complete = "4"
 clatter = { version = "2.2.0", default-features = false, features = [

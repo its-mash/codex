@@ -225,6 +225,52 @@ mod background_terminal_pagination_tests {
     }
 }
 
+mod loop_pagination_tests {
+    use super::super::paginate_loops;
+    use codex_app_server_protocol::LoopAutomation;
+    use pretty_assertions::assert_eq;
+
+    fn loop_automation(id: &str) -> LoopAutomation {
+        LoopAutomation {
+            id: id.to_string(),
+            name: format!("loop-{id}"),
+            prompt: format!("Run fixture {id}."),
+            every_seconds: 60,
+            enabled: true,
+            created_at: 1,
+            next_due_at: 2,
+            last_run_at: None,
+        }
+    }
+
+    #[test]
+    fn paginates_with_opaque_offset_cursor() {
+        let loops = vec![
+            loop_automation("a"),
+            loop_automation("b"),
+            loop_automation("c"),
+        ];
+        let first = paginate_loops(loops.clone(), /*cursor*/ None, Some(2))
+            .expect("first page should be valid");
+        assert_eq!(
+            first,
+            codex_app_server_protocol::LoopListResponse {
+                data: loops[..2].to_vec(),
+                next_cursor: Some("2".to_string()),
+            }
+        );
+        assert_eq!(
+            paginate_loops(loops.clone(), first.next_cursor, Some(2))
+                .expect("second page should be valid"),
+            codex_app_server_protocol::LoopListResponse {
+                data: loops[2..].to_vec(),
+                next_cursor: None,
+            }
+        );
+        assert!(paginate_loops(loops, Some("invalid".to_string()), Some(2)).is_err());
+    }
+}
+
 mod thread_processor_behavior_tests {
     async fn forked_from_id_from_rollout(path: &Path) -> Option<String> {
         codex_core::read_session_meta_line(path)

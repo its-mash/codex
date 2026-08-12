@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::agent_resolver::ResolvedAgentTarget;
 use crate::tools::handlers::multi_agents_spec::create_interrupt_agent_tool_v2;
 use codex_protocol::error::CodexErrorDetails;
 use codex_tools::ToolSpec;
@@ -35,7 +36,19 @@ async fn handle_interrupt_agent(
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: InterruptAgentArgs = parse_arguments(&arguments)?;
-    let agent_id = resolve_agent_target(&session, &turn, &args.target).await?;
+    let target = resolve_agent_target(&session, &turn, &args.target).await?;
+    let agent_id = match target {
+        ResolvedAgentTarget::Local(agent_id) => agent_id,
+        ResolvedAgentTarget::External { handle, agent } => {
+            let previous_status = external_agent_status(agent.status);
+            handle
+                .provider()
+                .interrupt(&agent, "interrupt requested by a Codex teammate")
+                .await
+                .map_err(FunctionCallError::RespondToModel)?;
+            return Ok(InterruptAgentResult { previous_status });
+        }
+    };
     let receiver_agent = session
         .services
         .agent_control
@@ -93,6 +106,15 @@ async fn handle_interrupt_agent(
     Ok(InterruptAgentResult {
         previous_status: status,
     })
+}
+
+fn external_agent_status(status: codex_extension_api::ExternalAgentStatus) -> AgentStatus {
+    match status {
+        codex_extension_api::ExternalAgentStatus::Active => AgentStatus::Running,
+        codex_extension_api::ExternalAgentStatus::Idle
+        | codex_extension_api::ExternalAgentStatus::Unknown => AgentStatus::PendingInit,
+        codex_extension_api::ExternalAgentStatus::Stopped => AgentStatus::Shutdown,
+    }
 }
 
 impl CoreToolRuntime for Handler {

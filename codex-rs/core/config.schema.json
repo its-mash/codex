@@ -1025,6 +1025,45 @@
       },
       "type": "object"
     },
+    "ExternalTeamConfigToml": {
+      "additionalProperties": false,
+      "description": "Configuration for joining a team whose control plane is owned by another agent runtime.",
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "agent_role": {
+          "type": "string"
+        },
+        "claude_home": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "parent_name": {
+          "type": "string"
+        },
+        "poll_interval_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "team_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_name",
+        "claude_home",
+        "provider",
+        "team_name"
+      ],
+      "type": "object"
+    },
     "FeatureToml_for_CodeModeConfigToml": {
       "anyOf": [
         {
@@ -5108,6 +5147,14 @@
     },
     "experimental_use_unified_exec_tool": {
       "type": "boolean"
+    },
+    "external_team": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExternalTeamConfigToml"
+        }
+      ],
+      "description": "External agent-team identity for native teammate mode."
     },
     "features": {
       "additionalProperties": false,

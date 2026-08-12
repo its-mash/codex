@@ -1156,11 +1156,25 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 exposure,
             );
             registry.register_trusted_with_exposure(
-                multi_agent_v2_handler(SendMessageHandlerV2, tool_namespace),
+                multi_agent_v2_handler(
+                    if turn_context.config.external_team.is_some() {
+                        SendMessageHandlerV2::plaintext()
+                    } else {
+                        SendMessageHandlerV2::encrypted()
+                    },
+                    tool_namespace,
+                ),
                 exposure,
             );
             registry.register_trusted_with_exposure(
-                multi_agent_v2_handler(FollowupTaskHandlerV2, tool_namespace),
+                multi_agent_v2_handler(
+                    if turn_context.config.external_team.is_some() {
+                        FollowupTaskHandlerV2::plaintext()
+                    } else {
+                        FollowupTaskHandlerV2::encrypted()
+                    },
+                    tool_namespace,
+                ),
                 exposure,
             );
             if turn_context.config.multi_agent_v2.wait_agent_enabled {

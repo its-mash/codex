@@ -600,6 +600,21 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadCompactStartResponse,
     },
+    LoopCreate => "loop/create" {
+        params: v2::LoopCreateParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::LoopCreateResponse,
+    },
+    LoopList => "loop/list" {
+        params: v2::LoopListParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::LoopListResponse,
+    },
+    LoopDelete => "loop/delete" {
+        params: v2::LoopDeleteParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::LoopDeleteResponse,
+    },
     ThreadShellCommand => "thread/shellCommand" {
         params: v2::ThreadShellCommandParams,
         serialization: thread_id(params.thread_id),

@@ -1,6 +1,9 @@
 use super::*;
 use crate::agent::control::ListedAgent;
 use crate::tools::handlers::multi_agents_spec::create_list_agents_tool;
+use codex_extension_api::ExternalAgentStatus;
+use codex_extension_api::ExternalTeamHandle;
+use codex_protocol::protocol::AgentStatus;
 use codex_tools::ToolSpec;
 
 pub(crate) struct Handler;
@@ -36,14 +39,42 @@ impl Handler {
             .services
             .agent_control
             .register_session_root(session.thread_id, turn.parent_thread_id);
-        let agents = session
+        let mut agents = session
             .services
             .agent_control
             .list_agents(&turn.session_source, args.path_prefix.as_deref())
             .await
             .map_err(collab_spawn_error)?;
+        let external_agents_visible = args
+            .path_prefix
+            .as_deref()
+            .is_none_or(|prefix| prefix == "external" || prefix.starts_with("external:"));
+        if external_agents_visible
+            && let Some(handle) = session
+                .services
+                .thread_extension_data
+                .get::<ExternalTeamHandle>()
+        {
+            let external_agents = handle
+                .provider()
+                .list_agents()
+                .await
+                .map_err(FunctionCallError::RespondToModel)?;
+            agents.extend(external_agents.into_iter().map(|agent| ListedAgent {
+                agent_name: agent.name,
+                agent_status: external_status(agent.status),
+            }));
+        }
 
         Ok(boxed_tool_output(ListAgentsResult { agents }))
+    }
+}
+
+fn external_status(status: ExternalAgentStatus) -> AgentStatus {
+    match status {
+        ExternalAgentStatus::Active => AgentStatus::Running,
+        ExternalAgentStatus::Idle | ExternalAgentStatus::Unknown => AgentStatus::PendingInit,
+        ExternalAgentStatus::Stopped => AgentStatus::Shutdown,
     }
 }
 

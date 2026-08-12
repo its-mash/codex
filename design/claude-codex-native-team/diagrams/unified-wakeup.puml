@@ -1,0 +1,49 @@
+@startuml
+title One native wakeup path for communication and automation
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+component "Claude message" as ClaudeMessage
+component "Cron fire" as CronEvent
+component "/loop tick" as LoopEvent
+component "Monitor condition" as MonitorEvent
+component "Lifecycle event" as LifecycleEvent
+
+component "InterAgentCommunication" as IAC
+component "Codex InputQueue" as Queue
+component "Native pending-work scheduler" as Scheduler
+component "Active turn mailbox" as Active
+component "New Codex turn" as NewTurn
+database "Claude task files" as TaskStore
+component "task_* CAS tools" as TaskTools
+
+ClaudeMessage --> IAC : provider translation
+CronEvent --> IAC : /root/automation
+LoopEvent --> IAC : /root/automation
+MonitorEvent --> IAC : /root/automation
+LifecycleEvent --> IAC : ordinary message or shutdown Op
+IAC --> Queue : Op::InterAgentCommunication
+Queue --> Scheduler
+
+TaskTools <--> TaskStore : lock + revision CAS
+
+Scheduler --> Active : thread already active
+Scheduler --> NewTurn : idle + trigger_turn
+
+note bottom of Queue
+  wait_agent subscribes to the same
+  mailbox activity notification.
+end note
+
+note bottom of IAC
+  No terminal input, prompt hook,
+  background shell sleep, or fake user turn.
+end note
+
+note bottom of TaskStore
+  Task changes are tool-driven in the MVP.
+  Initial assignment arrives as a Claude message.
+end note
+@enduml

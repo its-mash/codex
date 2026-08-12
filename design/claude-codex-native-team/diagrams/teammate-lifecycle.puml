@@ -1,0 +1,42 @@
+@startuml
+title Native Codex teammate lifecycle
+
+skinparam shadowing false
+
+[*] --> Routed : Claude invokes teammate command
+Routed --> Starting : model selects Codex engine
+
+Starting : Parse identity and role
+Starting : Build isolated Codex config
+Starting : Start normal TUI/thread
+Starting : Install external-team extension
+
+Starting --> Joining : provider waits for complete roster entry
+Joining --> Failed : unsupported version or identity mismatch
+Joining --> Working : initial NEW_TASK submitted
+
+Working --> Working : mailbox message during active turn
+Working --> Idle : turn completes
+Idle --> Working : Claude/task/cron/loop/monitor event
+Idle --> Working : operator enters TUI input
+
+Working --> Interrupted : parent interrupt or operator interrupt
+Interrupted --> Working : follow-up native communication
+Interrupted --> Idle : no pending work
+
+Working --> Stopping : approved shutdown or roster removal
+Idle --> Stopping : approved shutdown or roster removal
+Interrupted --> Stopping : approved shutdown or roster removal
+
+Stopping : stop child agents
+Stopping : cancel monitors and terminals
+Stopping : stop scheduler; any lease expires <= 30s
+Stopping : flush rollout and journal
+Stopping : send lifecycle acknowledgment
+Stopping : stop sibling Code Mode host
+
+Stopping --> [*]
+
+Failed : visible error; no silent Claude fallback
+Failed --> [*]
+@enduml

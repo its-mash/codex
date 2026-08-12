@@ -1,0 +1,96 @@
+{
+  "fixture": "codex_native_mock",
+  "date": "2026-08-12",
+  "team": {
+    "name": "session-662e2b7b",
+    "note": "Claude Code 2.1.228 does not expose TeamCreate; the implicit native team was created on the first background Agent call.",
+    "lead": "team-lead (Claude)",
+    "member": {
+      "name": "codex-worker",
+      "agent_id": "codex-worker@session-662e2b7b",
+      "subagent_type": "native-codex-worker",
+      "model_override": "none; the teammate launch shim selected the role's native OpenAI model"
+    }
+  },
+  "task": {
+    "id": "1",
+    "subject": "Native contract exercise",
+    "owner": "codex-worker",
+    "final_status": "completed",
+    "status_transitions_observed": [
+      "created (pending, owner=codex-worker, set by lead)",
+      "in_progress (observed by lead)",
+      "completed (observed by lead)"
+    ]
+  },
+  "native_round_trip": [
+    {
+      "step": "NATIVE_READY",
+      "direction": "codex-worker -> team-lead",
+      "observed": true,
+      "content": "NATIVE_READY"
+    },
+    {
+      "step": "PING_NATIVE",
+      "direction": "team-lead -> codex-worker",
+      "observed": true,
+      "content": "PING_NATIVE",
+      "message_id": "e0bcf322-2782-43f3-9ce0-619bcb4b19c0"
+    },
+    {
+      "step": "PONG_NATIVE",
+      "direction": "codex-worker -> team-lead",
+      "observed": true,
+      "content": "PONG_NATIVE"
+    },
+    {
+      "step": "LOOP_FIRED",
+      "direction": "codex-worker -> team-lead",
+      "observed": true,
+      "content": "LOOP_FIRED",
+      "automation_id": "019ff450-8d64-7a33-8d8a-909d15cf1fbc"
+    },
+    {
+      "step": "CRON_FIRED",
+      "direction": "codex-worker -> team-lead",
+      "observed": true,
+      "content": "CRON_FIRED",
+      "automation_id": "019ff450-9bfe-73c2-acf3-4c0fa07778e9",
+      "trigger": "cron_run"
+    },
+    {
+      "step": "MONITOR_FIRED",
+      "direction": "codex-worker -> team-lead",
+      "observed": true,
+      "content": "MONITOR_FIRED",
+      "monitor_id": "019ff451-2549-7cf3-9689-8809855774f7",
+      "process_id": 91670,
+      "matched_output": "SAFE_MONITOR_READY"
+    }
+  ],
+  "shutdown": {
+    "request": {
+      "direction": "team-lead -> codex-worker",
+      "type": "shutdown_request",
+      "request_id": "shutdown-1786510398582@codex-worker"
+    },
+    "response": {
+      "direction": "codex-worker -> team-lead",
+      "type": "shutdown_response",
+      "request_id": "shutdown-1786510398582@codex-worker",
+      "approve": true,
+      "request_id_matches": true
+    },
+    "member_removed": true,
+    "member_process_gone": true,
+    "code_mode_host_gone": true,
+    "monitored_process_gone": true
+  },
+  "boundaries_respected": {
+    "no_tmux_send_keys": true,
+    "no_network_or_browser_or_mcp": true,
+    "no_other_programs_touched": true,
+    "no_model_override_on_spawn": true
+  },
+  "pass": true
+}

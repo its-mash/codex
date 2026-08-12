@@ -11,6 +11,7 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::multi_agents_common::*;
+use crate::tools::handlers::multi_agents_spec::MessageArgumentEncoding;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
@@ -59,12 +60,15 @@ fn communication_from_tool_message(
     recipient: AgentPath,
     message: String,
     source: &crate::tools::context::ToolCallSource,
+    message_encoding: MessageArgumentEncoding,
     trigger_turn: bool,
 ) -> InterAgentCommunication {
-    if !matches!(
-        source,
-        crate::tools::context::ToolCallSource::DirectPlaintextMessage
-    ) {
+    if message_encoding == MessageArgumentEncoding::Encrypted
+        && !matches!(
+            source,
+            crate::tools::context::ToolCallSource::DirectPlaintextMessage
+        )
+    {
         return InterAgentCommunication::new_encrypted(
             author,
             recipient,

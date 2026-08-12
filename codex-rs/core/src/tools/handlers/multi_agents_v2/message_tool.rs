@@ -4,9 +4,12 @@
 //! resulting `InterAgentCommunication` should wake the target immediately.
 
 use super::*;
+use crate::agent::agent_resolver::ResolvedAgentTarget;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::tools::context::FunctionToolOutput;
+use crate::tools::handlers::multi_agents_spec::MessageArgumentEncoding;
+use codex_extension_api::ExternalMessageDelivery;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MessageDeliveryMode {
@@ -54,6 +57,7 @@ pub(crate) async fn handle_message_string_tool(
     mode: MessageDeliveryMode,
     target: String,
     message: String,
+    message_encoding: MessageArgumentEncoding,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
     let message = message_content(message)?;
     let ToolInvocation {
@@ -64,7 +68,22 @@ pub(crate) async fn handle_message_string_tool(
         source,
         ..
     } = invocation;
-    let receiver_thread_id = resolve_agent_target(&session, &turn, &target).await?;
+    let receiver = resolve_agent_target(&session, &turn, &target).await?;
+    let receiver_thread_id = match receiver {
+        ResolvedAgentTarget::Local(receiver_thread_id) => receiver_thread_id,
+        ResolvedAgentTarget::External { handle, agent } => {
+            let delivery = match mode {
+                MessageDeliveryMode::QueueOnly => ExternalMessageDelivery::Queue,
+                MessageDeliveryMode::TriggerTurn => ExternalMessageDelivery::Wake,
+            };
+            handle
+                .provider()
+                .send_message(&agent, &message, delivery)
+                .await
+                .map_err(FunctionCallError::RespondToModel)?;
+            return Ok(FunctionToolOutput::from_text(String::new(), Some(true)));
+        }
+    };
     let receiver_agent = session
         .services
         .agent_control
@@ -100,6 +119,7 @@ pub(crate) async fn handle_message_string_tool(
         receiver_agent_path.clone(),
         message,
         &source,
+        message_encoding,
         mode.trigger_turn(),
     );
     let kind = match mode {

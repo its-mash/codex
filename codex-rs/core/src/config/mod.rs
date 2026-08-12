@@ -24,6 +24,7 @@ use codex_config::ThreadConfigLoader;
 use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
+use codex_config::config_toml::ExternalTeamConfigToml;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
@@ -632,6 +633,9 @@ pub struct Config {
 
     /// Optional override of model selection.
     pub model: Option<String>,
+
+    /// External agent-team identity for native teammate mode.
+    pub external_team: Option<ExternalTeamConfigToml>,
 
     /// Effective service tier request id preference for new turns.
     /// `default` means the user explicitly selected standard routing.
@@ -3757,6 +3761,26 @@ impl Config {
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;
         let current_time_reminder = resolve_current_time_reminder_config(&cfg, &features)?;
         let terminal_resize_reflow = resolve_terminal_resize_reflow_config(&cfg);
+        let external_team = cfg.external_team.clone();
+        if let Some(external_team) = external_team.as_ref() {
+            if external_team.provider != "claude_code" {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "unsupported external_team.provider `{}`; expected `claude_code`",
+                        external_team.provider
+                    ),
+                ));
+            }
+            if external_team.team_name.trim().is_empty()
+                || external_team.agent_name.trim().is_empty()
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "external_team.team_name and external_team.agent_name must not be empty",
+                ));
+            }
+        }
 
         let agent_roles =
             agent_roles::load_agent_roles(fs, &cfg, &config_layer_stack, &mut startup_warnings)
@@ -4307,6 +4331,7 @@ impl Config {
             use_experimental_unified_exec_tool,
             background_terminal_max_timeout,
             ghost_snapshot,
+            external_team,
             multi_agent_v2,
             token_budget,
             rollout_budget,
