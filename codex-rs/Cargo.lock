@@ -3515,6 +3515,7 @@ dependencies = [
  "codex-secrets",
  "codex-terminal-detection",
  "codex-utils-template",
+ "codex-workload-identity",
  "core_test_support",
  "http 1.4.0",
  "jsonwebtoken",
