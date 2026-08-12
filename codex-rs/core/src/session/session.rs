@@ -85,9 +85,6 @@ pub(crate) struct SessionConfiguration {
     /// Base instructions for the session.
     pub(super) base_instructions: String,
 
-    /// Compact prompt override.
-    pub(super) compact_prompt: Option<String>,
-
     /// When to escalate for approval for execution
     pub(super) approval_policy: Constrained<AskForApproval>,
     pub(super) approvals_reviewer: ApprovalsReviewer,
@@ -167,6 +164,7 @@ impl SessionConfiguration {
                 .permissions
                 .allow_login_shell,
             permission_profile: self.permission_profile_state.snapshot(),
+            selected_capability_roots: None,
         }
     }
 
@@ -1100,17 +1098,6 @@ impl Session {
                 );
             }
             session_configuration.thread_name = thread_name.clone();
-            validate_config_lock_if_configured(
-                &session_configuration,
-                base_instructions_provenance.as_ref(),
-            )
-            .await?;
-            export_config_lock_if_configured(
-                &session_configuration,
-                thread_id,
-                base_instructions_provenance.as_ref(),
-            )
-            .await?;
             let mut state = SessionState::new_with_auto_compact_window_ids(
                 session_configuration.clone(),
                 initial_auto_compact_window_ids,
@@ -1200,6 +1187,7 @@ impl Session {
             ));
             let session_extension_data =
                 codex_extension_api::ExtensionData::new(session_id.to_string());
+            session_extension_data.insert(analytics_events_client.clone());
             let mcp_resource_client = Arc::new(McpResourceClient::new(Arc::clone(&mcp_runtime)));
             let extension_metrics =
                 extension_metrics::from_session_telemetry(session_telemetry.clone());
