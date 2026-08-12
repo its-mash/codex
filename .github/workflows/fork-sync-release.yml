@@ -203,6 +203,17 @@ jobs:
           echo "RUSTY_V8_ARCHIVE=$stable/$(basename "$RUSTY_V8_ARCHIVE")" >> "$GITHUB_ENV"
           echo "RUSTY_V8_SRC_BINDING_PATH=$stable/$(basename "$RUSTY_V8_SRC_BINDING_PATH")" >> "$GITHUB_ENV"
 
+      - name: Force fresh rusty_v8 link artifact (cache-safe)
+        # A restored cache marks the v8 crate as already built, so its build
+        # script does not re-run — but rust-cache does not preserve the 155 MB
+        # librusty_v8.a in v8's build-output dir, so the final link fails with
+        # "could not find native static library rusty_v8". Clean only v8 so its
+        # build script re-materializes the archive (seconds); the rest of the
+        # cached workspace/deps compile is kept.
+        if: steps.decide.outputs.needed == '1'
+        working-directory: codex-rs
+        run: cargo clean --release -p v8 || true
+
       - name: Build release binaries
         if: steps.decide.outputs.needed == '1'
         working-directory: codex-rs
