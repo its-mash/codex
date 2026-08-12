@@ -96,6 +96,19 @@ rm -f /home/benty/codex/codex-rs/target/dev-small/codex \
 # or pin it explicitly:  export CODEX_TEAMMATE_BIN="$HOME/.local/bin/codex"
 ```
 
+## One-time: silence inherited upstream CI
+
+The fork inherits every `openai/codex` workflow (`blocking-ci`, `rust-ci`,
+`postmerge-ci`, release jobs, …). They fail on the fork because they need
+OpenAI's secrets/infra, and each push would otherwise email you failures. The
+`gh` CLI token here is not a repo admin, so disable them once from the web UI:
+
+> **Repo → Settings → Actions → General**, or **Actions tab → each workflow →
+> ⋯ → Disable workflow.** Keep **`fork-sync-release`** enabled; disable the rest.
+
+Disabling is a repo-state setting, so it survives future upstream merges (the
+workflow files stay on disk but do not run).
+
 ## Status & logs
 
 - `~/.codex-fork-sync/update.log` — local updater log.
