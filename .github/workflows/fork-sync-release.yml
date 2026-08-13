@@ -1,14 +1,15 @@
 name: fork-sync-release
 
-# Keep this fork riding on top of openai/codex and publish installable releases.
+# Keep this fork riding on top of openai/codex and publish installable releases
+# for Linux amd64 and Windows amd64.
 #
 #   schedule / manual  -> merge openai/codex main into this fork's main
 #       clean merge     -> push, then build + publish a GitHub Release
-#       conflict        -> open/refresh an issue with local-fix steps, fail the run
+#       conflict        -> write fix steps to the run summary, fail the run (email)
 #   push to main       -> (your conflict fix lands here) build + publish if HEAD is unreleased
 #
-# The local machine only consumes the published Release (see fork-tools/codex-update.sh),
-# exactly like the official codex auto-update flow.
+# The local machine only consumes the published Release (see fork-tools/), exactly
+# like the official codex auto-update flow.
 
 on:
   schedule:
@@ -35,7 +36,6 @@ permissions:
 
 env:
   UPSTREAM_URL: https://github.com/openai/codex.git
-  TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
 jobs:
   sync:
@@ -127,9 +127,13 @@ jobs:
           echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-  release:
+  prepare:
     needs: sync
     runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+      tag: ${{ steps.decide.outputs.tag }}
+      short_sha: ${{ steps.decide.outputs.short_sha }}
     steps:
       - name: Checkout synced main
         uses: actions/checkout@v4
@@ -137,7 +141,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Decide whether a release is needed
+      - name: Decide whether a release is needed and compute the shared tag
         id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -147,7 +151,6 @@ jobs:
           short="$(git rev-parse --short HEAD)"
           echo "short_sha=$short" >> "$GITHUB_OUTPUT"
           echo "tag=fork-$(date -u +%Y%m%d-%H%M%S)-$short" >> "$GITHUB_OUTPUT"
-          echo "upstream_base=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           if [ "${FORCE:-false}" = "true" ]; then
             echo "needed=1" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -160,104 +163,146 @@ jobs:
             echo "needed=1" >> "$GITHUB_OUTPUT"
           fi
 
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.needed == '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout synced main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - name: Install Rust toolchain
-        if: steps.decide.outputs.needed == '1'
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo build
-        if: steps.decide.outputs.needed == '1'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-rs
-          # Keep the (expensive) dependency compile even when a later step fails
-          # — e.g. the rusty_v8 link — so the next run resumes warm instead of
-          # recompiling the whole workspace from scratch.
+          # Keep the (expensive) dependency compile even when a later step fails.
+          # rust-cache keys per OS/arch, so Linux and Windows caches never collide.
           cache-on-failure: true
-          # v2: drop the earlier cache that baked a per-run RUNNER_TEMP path for
-          # the rusty_v8 archive into the cached v8 build (stale path -> link
-          # failure on restore). The archive path is stabilized below so this
-          # key stays valid from here on.
           prefix-key: fork-release-v2
 
       - name: Set up Codex-built rusty_v8
         # codex-code-mode-host links V8; the default rusty_v8 prebuilt archive is
         # not published for this profile, so use openai/codex's rusty-v8-v* release
-        # artifacts (this sets RUSTY_V8_ARCHIVE + RUSTY_V8_SRC_BINDING_PATH).
-        if: steps.decide.outputs.needed == '1'
+        # artifacts. Handles both the Linux `.a.gz` and Windows `.lib.gz` profiles
+        # and sets RUSTY_V8_ARCHIVE + RUSTY_V8_SRC_BINDING_PATH.
         uses: ./.github/actions/setup-rusty-v8
         with:
-          target: ${{ env.TARGET_TRIPLE }}
-
-      - name: Stabilize rusty_v8 archive path (cache-safe)
-        # setup-rusty-v8 places the archive under RUNNER_TEMP, which differs every
-        # run; the v8 crate bakes that path into its (cached) build output, so a
-        # restored cache points at a dead path. Copy to a fixed, run-independent
-        # location and re-export, so the cached v8 build stays valid across runs.
-        if: steps.decide.outputs.needed == '1'
-        run: |
-          set -euo pipefail
-          stable="$HOME/.fork-rusty-v8"
-          mkdir -p "$stable"
-          cp -f "$RUSTY_V8_ARCHIVE" "$stable/"
-          cp -f "$RUSTY_V8_SRC_BINDING_PATH" "$stable/"
-          echo "RUSTY_V8_ARCHIVE=$stable/$(basename "$RUSTY_V8_ARCHIVE")" >> "$GITHUB_ENV"
-          echo "RUSTY_V8_SRC_BINDING_PATH=$stable/$(basename "$RUSTY_V8_SRC_BINDING_PATH")" >> "$GITHUB_ENV"
+          target: ${{ matrix.target }}
 
       - name: Force fresh rusty_v8 link artifact (cache-safe)
-        # A restored cache marks the v8 crate as already built, so its build
-        # script does not re-run — but rust-cache does not preserve the 155 MB
-        # librusty_v8.a in v8's build-output dir, so the final link fails with
-        # "could not find native static library rusty_v8". Clean only v8 so its
-        # build script re-materializes the archive (seconds); the rest of the
-        # cached workspace/deps compile is kept.
-        if: steps.decide.outputs.needed == '1'
+        # A restored cache marks the v8 crate as already built, so its build script
+        # does not re-run — but rust-cache does not preserve v8's large static lib
+        # in its build-output dir, so the final link fails with "could not find
+        # native static library rusty_v8". Clean only v8 so its build script
+        # re-materializes the archive (seconds) with this run's RUSTY_V8_ARCHIVE;
+        # the rest of the cached workspace/deps compile is kept.
+        shell: bash
         working-directory: codex-rs
-        run: cargo clean --release -p v8 || true
+        run: cargo clean --release --target ${{ matrix.target }} -p v8 || true
 
       - name: Build release binaries
-        if: steps.decide.outputs.needed == '1'
+        shell: bash
         working-directory: codex-rs
         run: |
           set -euo pipefail
-          cargo build --release --locked --bin codex -p codex-cli
-          cargo build --release --locked --bin codex-code-mode-host -p codex-code-mode-host
+          cargo build --release --locked --target ${{ matrix.target }} --bin codex -p codex-cli
+          cargo build --release --locked --target ${{ matrix.target }} --bin codex-code-mode-host -p codex-code-mode-host
 
-      - name: Package standalone tarball
-        if: steps.decide.outputs.needed == '1'
+      - name: Package standalone archive
         id: package
+        shell: bash
         env:
-          TAG: ${{ steps.decide.outputs.tag }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
-          pkg="codex-${TAG}-${TARGET_TRIPLE}"
+          exe=""; [ "$ARCHIVE" = "zip" ] && exe=".exe"
+          pkg="codex-${TAG}-${TARGET}"
           mkdir -p "dist/${pkg}/bin"
-          cp codex-rs/target/release/codex "dist/${pkg}/bin/"
-          cp codex-rs/target/release/codex-code-mode-host "dist/${pkg}/bin/"
-          tar -C dist -czf "dist/${pkg}.tar.gz" "${pkg}"
-          ( cd dist && sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256" )
-          echo "artifact=dist/${pkg}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "checksum=dist/${pkg}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+          cp "codex-rs/target/${TARGET}/release/codex${exe}" "dist/${pkg}/bin/"
+          cp "codex-rs/target/${TARGET}/release/codex-code-mode-host${exe}" "dist/${pkg}/bin/"
+          cd dist
+          if [ "$ARCHIVE" = "zip" ]; then
+            7z a -tzip "${pkg}.zip" "${pkg}" >/dev/null
+            asset="${pkg}.zip"
+          else
+            tar -czf "${pkg}.tar.gz" "${pkg}"
+            asset="${pkg}.tar.gz"
+          fi
+          sha256sum "$asset" > "${asset}.sha256"
+          echo "Packaged ${asset}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    needs: [prepare, build]
+    # always() so a single-platform build failure still ships the platform that
+    # succeeded (the run still reports failure -> notification email). Skips only
+    # when no release is needed or nothing built.
+    if: always() && needs.prepare.outputs.needed == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
 
       - name: Publish GitHub Release
-        if: steps.decide.outputs.needed == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.decide.outputs.tag }}
-          SHORT: ${{ steps.decide.outputs.short_sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHORT: ${{ needs.prepare.outputs.short_sha }}
         run: |
           set -euo pipefail
+          mapfile -t files < <(find dist -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) 2>/dev/null || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No build artifacts to publish (all platform builds failed)."
+            exit 0
+          fi
+          have_linux=$(printf '%s\n' "${files[@]}" | grep -c 'x86_64-unknown-linux-gnu.tar.gz$' || true)
+          have_windows=$(printf '%s\n' "${files[@]}" | grep -c 'x86_64-pc-windows-msvc.zip$' || true)
           notes=$(cat <<EOF
           Automated fork release built from this fork's \`main\` at commit \`${SHORT}\`,
           which tracks the latest \`openai/codex\` main plus this fork's changes.
 
-          Target: \`${TARGET_TRIPLE}\`. Install/update locally with
-          \`fork-tools/codex-update.sh\` (or its systemd timer), which swaps
-          \`~/.codex/packages/standalone/current\` to this build.
+          Assets in this release:
+          - Linux amd64 (\`x86_64-unknown-linux-gnu\`): $( [ "$have_linux" != 0 ] && echo 'included (.tar.gz)' || echo 'MISSING — build failed' )
+          - Windows amd64 (\`x86_64-pc-windows-msvc\`): $( [ "$have_windows" != 0 ] && echo 'included (.zip)' || echo 'MISSING — build failed' )
+
+          Install / use on both platforms: see \`fork-tools/README.md\`.
           EOF
           )
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" \
             --notes "$notes" \
-            "${{ steps.package.outputs.artifact }}" \
-            "${{ steps.package.outputs.checksum }}"
+            "${files[@]}"

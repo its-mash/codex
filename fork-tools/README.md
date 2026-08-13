@@ -1,36 +1,44 @@
 # Fork auto-sync + auto-release + auto-update
 
-This fork stays current with `openai/codex` and ships installable builds without
-manual work. Three moving parts:
+This fork stays current with `openai/codex` and ships installable builds for
+**Linux amd64** and **Windows amd64** without manual work. Three moving parts:
 
 ```
- openai/codex ──(every 6h)──► GitHub Actions on its-mash/codex ──► GitHub Release
-        merge into this fork's main          build release binaries        │
-                │                                                           │
-         conflict? open an issue + fail                                     ▼
-         (you resolve locally, push)                     your machine: codex-update.sh
-                                                          swaps standalone/current
+ openai/codex ─(every 6h)─► GitHub Actions on its-mash/codex ─► GitHub Release
+        merge into this fork's main       build both platforms:      │
+                │                          Linux amd64 (.tar.gz)      │
+         conflict? run summary + fail      Windows amd64 (.zip)       ▼
+         (you resolve locally, push)                    your machine auto-updates:
+                                             Linux  codex-update.sh  (systemd timer)
+                                             Windows codex-update.ps1 (scheduled task)
 ```
 
 - **Sync + build + release** run entirely in GitHub Actions
-  ([`.github/workflows/fork-sync-release.yml`](../.github/workflows/fork-sync-release.yml)).
+  ([`.github/workflows/fork-sync-release.yml`](../.github/workflows/fork-sync-release.yml)),
+  building both `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`.
 - **Your local install auto-updates** from the fork's latest Release, the same
-  way official codex updates from official releases
-  ([`codex-update.sh`](codex-update.sh)).
+  way official codex updates from official releases — Linux via
+  [`codex-update.sh`](codex-update.sh), Windows via
+  [`codex-update.ps1`](codex-update.ps1).
 
 ## 1. GitHub Actions: sync + release
 
-`fork-sync-release.yml` runs every 6 hours (and on manual dispatch):
+`fork-sync-release.yml` runs every 6 hours (and on manual dispatch). Its jobs are
+`sync` → `prepare` → `build` (a Linux + Windows matrix) → `publish`:
 
 1. **sync** — merges the latest `openai/codex` `main` into this fork's `main`.
-   - **Clean merge** → pushes `main`, then the `release` job builds the
-     `codex` and `codex-code-mode-host` release binaries and publishes a GitHub
-     Release (`fork-<date>-<sha>`) with a `.tar.gz` for `x86_64-unknown-linux-gnu`
-     plus a `.sha256`.
-   - **Conflict** → the merge is aborted in CI, an issue labelled
-     `upstream-sync-conflict` is opened/refreshed with the exact local commands to
-     resolve it, and the run **fails** (so GitHub emails you). Auto-sync stays
-     paused until you fix it.
+   - **Clean merge** → pushes `main`.
+   - **Conflict** → the merge is aborted in CI, the fix steps are written to the
+     run **summary**, and the run **fails** so GitHub emails you. (The fork has
+     Issues disabled, so no issue is opened.) Auto-sync stays paused until you fix
+     it locally.
+2. **build** — for each of `x86_64-unknown-linux-gnu` (on `ubuntu-latest`) and
+   `x86_64-pc-windows-msvc` (on `windows-latest`), builds `codex` and
+   `codex-code-mode-host` and packages `bin/` into a `.tar.gz` (Linux) or `.zip`
+   (Windows), each with a `.sha256`.
+3. **publish** — attaches both platforms' archives to one GitHub Release
+   (`fork-<date>-<sha>`). If one platform's build fails, the other still ships and
+   the run is marked failed so you get notified.
 
 `rerere` is enabled in CI and locally, so a conflict you resolve once is replayed
 automatically the next time the same hunk conflicts.
@@ -54,7 +62,8 @@ starts. The scheduled every-6h run needs none of this.
 
 ### When a sync conflict is flagged
 
-You get a failed-run notification and an open issue. Resolve it on this machine:
+You get a failed-run email; open the run and its **summary** shows the conflicting
+files and these steps. Resolve on the machine that holds the clone:
 
 ```bash
 cd /home/benty/codex
@@ -64,41 +73,88 @@ git add -A && git commit         # completes the merge
 git push origin main             # this push builds + publishes a release
 ```
 
-The next scheduled run sees a clean tree, closes the conflict issue, and resumes.
+The next scheduled run sees a clean tree and resumes. `GITHUB_TOKEN`'s default
+`contents: write` is all the workflow needs — no PAT.
 
-> Requires the repo secret to allow Actions to push and open issues — the default
-> `GITHUB_TOKEN` already has `contents: write` + `issues: write` as declared in the
-> workflow. No PAT needed.
+## 2. Install & use
 
-## 2. Local auto-update
+Both platforms consume the **same GitHub Release**; pick your OS below.
 
-[`codex-update.sh`](codex-update.sh) polls the fork's latest Release and, if it is
-newer than what's installed, downloads the tarball, extracts it to
-`~/.codex/packages/standalone/releases/<tag>-<triple>/bin/`, and atomically
-repoints `~/.codex/packages/standalone/current`. Your existing
-`~/.local/bin/codex -> current/bin/codex` symlink follows automatically.
+### Linux amd64
 
-Install the hourly timer:
+Auto-update (recommended) — installs the fork release into the standard codex
+standalone layout and keeps it current:
 
 ```bash
-fork-tools/install-updater.sh          # enable hourly OnCalendar timer
+fork-tools/install-updater.sh          # enable an hourly systemd --user timer
 systemctl --user start codex-update.service   # run once now
-journalctl --user -u codex-update.service -f  # watch
+fork-tools/codex-update.sh             # ...or update by hand any time
 ```
 
-Run it by hand any time:
+It downloads the `*-x86_64-unknown-linux-gnu.tar.gz` asset, extracts to
+`~/.codex/packages/standalone/releases/<tag>-<triple>/bin/`, and atomically
+repoints `~/.codex/packages/standalone/current`; your existing
+`~/.local/bin/codex -> current/bin/codex` symlink follows. Uninstall the timer
+with `fork-tools/install-updater.sh --uninstall`.
+
+Manual install (no scripts):
 
 ```bash
-fork-tools/codex-update.sh
+gh release download --repo its-mash/codex --pattern '*-x86_64-unknown-linux-gnu.tar.gz'
+tar -xzf codex-*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 codex-*/bin/codex ~/.local/bin/codex
+install -Dm755 codex-*/bin/codex-code-mode-host ~/.local/bin/codex-code-mode-host
 ```
 
-Uninstall the timer: `fork-tools/install-updater.sh --uninstall`.
+Use it:
+
+```bash
+codex --version
+codex                       # interactive TUI
+codex exec "…"              # non-interactive
+codex teammate --team-name <team> --agent-name <name>   # native team member
+```
+
+### Windows amd64
+
+Auto-update (recommended) — no admin, no `gh` needed (public repo):
+
+```powershell
+pwsh -File fork-tools\codex-update.ps1
+```
+
+It downloads the `*-x86_64-pc-windows-msvc.zip` asset, verifies its `.sha256`,
+extracts to `%LOCALAPPDATA%\codex-fork\releases\<tag>-<triple>\`, repoints the
+`%LOCALAPPDATA%\codex-fork\current` junction, and adds `current\bin` to your user
+`PATH` (open a new terminal afterward). Run it again any time to pick up the
+latest release. To update on a schedule, register a daily Scheduled Task:
+
+```powershell
+$ps  = (Get-Command pwsh).Source
+$job = Join-Path $PWD 'fork-tools\codex-update.ps1'
+$act = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -File `"$job`""
+$trg = New-ScheduledTaskTrigger -Daily -At 9am
+Register-ScheduledTask -TaskName 'codex-fork-update' -Action $act -Trigger $trg
+```
+
+Manual install (no script): download the `*-x86_64-pc-windows-msvc.zip` from the
+[Releases page](https://github.com/its-mash/codex/releases/latest), extract it,
+and add its `bin` folder to your `PATH`.
+
+Use it (any terminal after PATH update):
+
+```powershell
+codex --version
+codex                       # interactive TUI
+codex exec "…"
+codex teammate --team-name <team> --agent-name <name>
+```
 
 ### Important: don't run the built-in `codex update`
 
-`codex update` pulls from **OpenAI's** releases and would overwrite `current` back
-to upstream codex, discarding the fork. Use `codex-update.sh` (this fork's updater)
-instead. Both manage the same `current` slot, so whichever ran last wins.
+`codex update` pulls from **OpenAI's** releases and would overwrite the fork build
+with upstream codex. Use this fork's updater (`codex-update.sh` /
+`codex-update.ps1`) instead.
 
 ### Teammate binaries
 
