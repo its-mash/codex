@@ -75,6 +75,15 @@ impl ChatWidget {
             ServerNotification::ItemCompleted(notification) => {
                 self.handle_item_completed_notification(notification, replay_kind);
             }
+            ServerNotification::RawResponseItemCompleted(notification) => {
+                // Surface messages that ARRIVED from outside this thread's own
+                // model — external teammates and native automation firings — so
+                // the operator has visibility into inbound team traffic and
+                // cron/loop/monitor events. Only live, not on history replay.
+                if replay_kind.is_none() {
+                    self.render_inbound_inter_agent(&notification.item);
+                }
+            }
             ServerNotification::AgentMessageDelta(notification) => {
                 self.on_agent_message_delta(notification.delta);
             }
@@ -201,7 +210,6 @@ impl ChatWidget {
             | ServerNotification::ThreadArchived(_)
             | ServerNotification::ThreadDeleted(_)
             | ServerNotification::ThreadUnarchived(_)
-            | ServerNotification::RawResponseItemCompleted(_)
             | ServerNotification::RawResponseCompleted(_)
             | ServerNotification::CommandExecOutputDelta(_)
             | ServerNotification::ProcessOutputDelta(_)
