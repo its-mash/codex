@@ -125,11 +125,15 @@ mkdir -p "$dest"
 cp -a "$pkg_dir/bin" "$dest/bin"
 chmod +x "$dest/bin/"* 2>/dev/null || true
 
-# Atomic swap of the 'current' pointer, then the stable bin symlink.
+# Atomic swap of the 'current' pointer, then the stable bin symlinks.
 ln -sfn "$dest" "$CURRENT_LINK.new"
 mv -Tf "$CURRENT_LINK.new" "$CURRENT_LINK"
 mkdir -p "$(dirname "$BIN_SYMLINK")"
 ln -sfn "$CURRENT_LINK/bin/codex" "$BIN_SYMLINK"
+# Also expose codex-code-mode-host next to codex so tools that resolve it as a
+# sibling of `codex` on PATH (e.g. the bb-team teammate launcher's
+# `command -v codex` fallback) find it.
+ln -sfn "$CURRENT_LINK/bin/codex-code-mode-host" "$(dirname "$BIN_SYMLINK")/codex-code-mode-host"
 echo "$latest_tag" > "$INSTALLED_MARKER"
 
 # --- prune old fork releases (keep the newest N, never touch non-fork dirs) -
