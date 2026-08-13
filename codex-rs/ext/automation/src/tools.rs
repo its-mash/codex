@@ -35,6 +35,12 @@ enum AutomationToolKind {
     MonitorStart,
     MonitorList,
     MonitorStop,
+    // Claude-compatible aliases so role instructions written for Claude Code
+    // (CronCreate/CronList/CronDelete) resolve verbatim on a native Codex
+    // teammate — same runtime, Claude's field names/schema.
+    CronCreateClaude,
+    CronListClaude,
+    CronDeleteClaude,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +85,21 @@ struct CronUpdateArgs {
     enabled: Option<bool>,
 }
 
+/// Claude Code's `CronCreate` shape: field `cron` (not `expression`), plus
+/// `recurring`/`durable`. Codex crons are durable + recurring, so `durable` is
+/// accepted-and-ignored and `recurring: false` is treated as recurring with a
+/// note (Codex has no one-shot cron primitive).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeCronCreateArgs {
+    cron: String,
+    prompt: String,
+    #[serde(default)]
+    recurring: Option<bool>,
+    #[serde(default)]
+    durable: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MonitorStartArgs {
@@ -104,6 +125,9 @@ impl AutomationTool {
             AutomationToolKind::MonitorStart,
             AutomationToolKind::MonitorList,
             AutomationToolKind::MonitorStop,
+            AutomationToolKind::CronCreateClaude,
+            AutomationToolKind::CronListClaude,
+            AutomationToolKind::CronDeleteClaude,
         ]
         .into_iter()
         .map(|kind| {
@@ -231,6 +255,42 @@ impl AutomationTool {
                         .map_err(tool_error)?,
                 )
             }
+            AutomationToolKind::CronCreateClaude => {
+                let args = parse_args::<ClaudeCronCreateArgs>(&call)?;
+                // `durable` is always true here; `recurring: false` has no Codex
+                // one-shot primitive, so it is created recurring (caller can
+                // cron_delete after the first fire).
+                let _ = args.durable;
+                let _ = args.recurring;
+                serde_json::to_value(
+                    self.runtime
+                        .create_cron(None, args.prompt, args.cron)
+                        .await
+                        .map_err(tool_error)?,
+                )
+            }
+            AutomationToolKind::CronListClaude => {
+                parse_args::<EmptyArgs>(&call)?;
+                let jobs = self
+                    .runtime
+                    .state()
+                    .await
+                    .map_err(tool_error)?
+                    .jobs
+                    .into_iter()
+                    .filter(|job| job.kind == AutomationKind::Cron)
+                    .collect::<Vec<_>>();
+                serde_json::to_value(jobs)
+            }
+            AutomationToolKind::CronDeleteClaude => {
+                let args = parse_args::<IdArgs>(&call)?;
+                serde_json::to_value(
+                    self.runtime
+                        .delete_job_kind(args.id, AutomationKind::Cron)
+                        .await
+                        .map_err(tool_error)?,
+                )
+            }
         }
         .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
         let output_tokens = approx_token_count(&value.to_string());
@@ -275,6 +335,9 @@ impl AutomationToolKind {
             Self::MonitorStart => "monitor_start",
             Self::MonitorList => "monitor_list",
             Self::MonitorStop => "monitor_stop",
+            Self::CronCreateClaude => "CronCreate",
+            Self::CronListClaude => "CronList",
+            Self::CronDeleteClaude => "CronDelete",
         }
     }
 
@@ -357,6 +420,28 @@ impl AutomationToolKind {
             ),
             Self::MonitorList => ("List native background-terminal monitors.", empty_schema()),
             Self::MonitorStop => ("Stop a native background-terminal monitor.", id_schema()),
+            Self::CronCreateClaude => (
+                "Schedule a prompt on a recurring UTC cron. Standard 5-field cron expression. Each fire enters through native inter-agent delivery and wakes an idle thread. (Claude-compatible alias of cron_create.)",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "cron": {"type": "string"},
+                        "prompt": {"type": "string"},
+                        "recurring": {"type": "boolean"},
+                        "durable": {"type": "boolean"}
+                    },
+                    "required": ["cron", "prompt"],
+                    "additionalProperties": false
+                }),
+            ),
+            Self::CronListClaude => (
+                "List scheduled cron jobs for this thread identity. (Claude-compatible alias of cron_list.)",
+                empty_schema(),
+            ),
+            Self::CronDeleteClaude => (
+                "Cancel a cron job by id. (Claude-compatible alias of cron_delete.)",
+                id_schema(),
+            ),
         };
         function_tool(self.name(), description, schema)
     }
