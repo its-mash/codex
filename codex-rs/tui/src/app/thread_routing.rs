@@ -191,9 +191,19 @@ impl App {
     pub(super) fn sync_active_agent_label(&mut self) {
         let label = self
             .agent_navigation
-            .active_agent_label(self.current_displayed_thread_id(), self.primary_thread_id);
+            .active_agent_label(self.current_displayed_thread_id(), self.primary_thread_id)
+            // In native-teammate mode there is a single thread, so the multi-agent
+            // navigation label stays hidden — but the operator still needs to know
+            // which team member this pane is. Fall back to the teammate identity.
+            .or_else(|| self.external_team_agent_label());
         self.chat_widget.set_active_agent_label(label);
         self.sync_side_thread_ui();
+    }
+
+    /// `<agent> @ <team>` when this session is a native Codex teammate, else None.
+    pub(super) fn external_team_agent_label(&self) -> Option<String> {
+        let team = self.config.external_team.as_ref()?;
+        Some(format!("teammate {} @ {}", team.agent_name, team.team_name))
     }
 
     pub(super) async fn thread_cwd(&self, thread_id: ThreadId) -> Option<AbsolutePathBuf> {
