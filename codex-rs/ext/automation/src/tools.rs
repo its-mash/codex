@@ -41,6 +41,10 @@ enum AutomationToolKind {
     CronCreateClaude,
     CronListClaude,
     CronDeleteClaude,
+    // Claude-compatible Monitor: LAUNCHES a command and streams its output as
+    // wake events (Claude semantics), unlike monitor_start which attaches to an
+    // existing process.
+    MonitorClaude,
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +104,21 @@ struct ClaudeCronCreateArgs {
     durable: Option<bool>,
 }
 
+/// Claude Code's `Monitor` shape: `command` is launched and its output streamed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeMonitorArgs {
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    contains: Option<String>,
+    #[serde(default)]
+    persistent: Option<bool>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MonitorStartArgs {
@@ -128,6 +147,7 @@ impl AutomationTool {
             AutomationToolKind::CronCreateClaude,
             AutomationToolKind::CronListClaude,
             AutomationToolKind::CronDeleteClaude,
+            AutomationToolKind::MonitorClaude,
         ]
         .into_iter()
         .map(|kind| {
@@ -291,6 +311,19 @@ impl AutomationTool {
                         .map_err(tool_error)?,
                 )
             }
+            AutomationToolKind::MonitorClaude => {
+                let args = parse_args::<ClaudeMonitorArgs>(&call)?;
+                // persistent/timeout are honored best-effort: the launched
+                // process is watched until it exits, monitor_stop, or shutdown.
+                let _ = args.persistent;
+                let _ = args.timeout_ms;
+                serde_json::to_value(
+                    self.runtime
+                        .launch_monitor(args.description, args.command, args.contains, false)
+                        .await
+                        .map_err(tool_error)?,
+                )
+            }
         }
         .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
         let output_tokens = approx_token_count(&value.to_string());
@@ -338,6 +371,7 @@ impl AutomationToolKind {
             Self::CronCreateClaude => "CronCreate",
             Self::CronListClaude => "CronList",
             Self::CronDeleteClaude => "CronDelete",
+            Self::MonitorClaude => "Monitor",
         }
     }
 
@@ -442,6 +476,21 @@ impl AutomationToolKind {
                 "Cancel a cron job by id. (Claude-compatible alias of cron_delete.)",
                 id_schema(),
             ),
+            Self::MonitorClaude => (
+                "Launch a command and stream its output as wake events: each stdout line (optionally filtered by `contains`) wakes this thread. Use for standing listeners (e.g. `campaign.py listen`, `peer.py listen`). Unlike monitor_start, this LAUNCHES the command. Set persistent=true for session-length watches. Stop via monitor_stop with the returned id.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "description": {"type": "string"},
+                        "contains": {"type": "string"},
+                        "persistent": {"type": "boolean"},
+                        "timeout_ms": {"type": "integer"}
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }),
+            ),
         };
         function_tool(self.name(), description, schema)
     }
@@ -501,4 +550,64 @@ where
 
 fn tool_error(error: String) -> FunctionCallError {
     FunctionCallError::RespondToModel(error)
+}
+
+#[cfg(test)]
+mod claude_alias_tests {
+    use super::AutomationToolKind;
+    use super::ClaudeCronCreateArgs;
+    use super::ClaudeMonitorArgs;
+
+    #[test]
+    fn claude_named_tools_match_claude_code_names() {
+        assert_eq!(AutomationToolKind::CronCreateClaude.name(), "CronCreate");
+        assert_eq!(AutomationToolKind::CronListClaude.name(), "CronList");
+        assert_eq!(AutomationToolKind::CronDeleteClaude.name(), "CronDelete");
+        assert_eq!(AutomationToolKind::MonitorClaude.name(), "Monitor");
+    }
+
+    #[test]
+    fn claude_named_tool_specs_carry_the_claude_name() {
+        for (kind, expected) in [
+            (AutomationToolKind::CronCreateClaude, "CronCreate"),
+            (AutomationToolKind::CronListClaude, "CronList"),
+            (AutomationToolKind::CronDeleteClaude, "CronDelete"),
+            (AutomationToolKind::MonitorClaude, "Monitor"),
+        ] {
+            match kind.spec() {
+                codex_extension_api::ToolSpec::Function(tool) => {
+                    assert_eq!(tool.name, expected);
+                }
+                other => panic!("expected a function tool for {expected}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn cron_create_accepts_claude_field_names() {
+        // Claude uses `cron` (not Codex's `expression`), plus recurring/durable.
+        let args: ClaudeCronCreateArgs = serde_json::from_value(serde_json::json!({
+            "cron": "23 * * * *",
+            "prompt": "re-mine intel",
+            "recurring": true,
+            "durable": true
+        }))
+        .expect("Claude CronCreate payload should deserialize");
+        assert_eq!(args.cron, "23 * * * *");
+        assert_eq!(args.prompt, "re-mine intel");
+        assert_eq!(args.recurring, Some(true));
+    }
+
+    #[test]
+    fn monitor_accepts_claude_launch_payload() {
+        // Claude's Monitor LAUNCHES a command (campaign/peer listeners).
+        let args: ClaudeMonitorArgs = serde_json::from_value(serde_json::json!({
+            "command": "cd $BBTEAM_PROGRAM_DIR && python3 .claude/lib/campaign.py listen 2>&1",
+            "description": "campaign changes",
+            "persistent": true
+        }))
+        .expect("Claude Monitor payload should deserialize");
+        assert!(args.command.contains("campaign.py listen"));
+        assert_eq!(args.persistent, Some(true));
+    }
 }

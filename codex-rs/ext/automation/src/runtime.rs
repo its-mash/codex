@@ -246,6 +246,80 @@ impl AutomationRuntime {
         self.store.stop_monitor(id).await
     }
 
+    /// Claude-`Monitor`-style launch-and-watch: spawn `command`, stream its
+    /// stdout, and wake the thread on each (optionally `contains`-filtered) line.
+    /// Session-only (not persisted), matching Claude's Monitor semantics. Stop
+    /// with `monitor_stop` using the returned id, or it ends when the process
+    /// exits / the thread shuts down.
+    pub(crate) async fn launch_monitor(
+        &self,
+        name: Option<String>,
+        command: String,
+        contains: Option<String>,
+        once: bool,
+    ) -> Result<serde_json::Value, String> {
+        use tokio::io::AsyncBufReadExt;
+        let mut child = tokio::process::Command::new("bash")
+            .arg("-lc")
+            .arg(&command)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| format!("failed to launch monitor command: {error}"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "monitor command produced no stdout handle".to_string())?;
+        let id = format!("moncmd-{}", Uuid::now_v7());
+        let display = name.clone().unwrap_or_else(|| "monitor".to_string());
+        let (cancel, mut cancel_rx) = watch::channel(false);
+        self.monitor_cancels
+            .lock()
+            .await
+            .insert(id.clone(), cancel);
+        let runtime = self.clone();
+        let monitor_id = id.clone();
+        let contains_filter = contains.clone();
+        tokio::spawn(async move {
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            loop {
+                tokio::select! {
+                    next = lines.next_line() => match next {
+                        Ok(Some(line)) => {
+                            let matched = contains_filter
+                                .as_deref()
+                                .is_none_or(|needle| line.contains(needle));
+                            if matched {
+                                let _ = runtime
+                                    .deliver(format!("[MONITOR:{display} {monitor_id}]\n{line}"))
+                                    .await;
+                                if once {
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(None) | Err(_) => break,
+                    },
+                    changed = cancel_rx.changed() => {
+                        if changed.is_err() || *cancel_rx.borrow() {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = child.kill().await;
+            runtime.monitor_cancels.lock().await.remove(&monitor_id);
+        });
+        Ok(serde_json::json!({
+            "id": id,
+            "kind": "command_monitor",
+            "command": command,
+            "matching": contains,
+            "once": once,
+        }))
+    }
+
     async fn spawn_monitor(&self, monitor: MonitorDefinition) {
         let (cancel, cancel_rx) = watch::channel(false);
         self.monitor_cancels
