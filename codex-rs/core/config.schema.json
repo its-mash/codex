@@ -2760,6 +2760,9 @@
           },
           "type": "object"
         },
+        "http_headers_helper": {
+          "type": "string"
+        },
         "name": {
           "default": null,
           "description": "Legacy display-name field accepted for backward compatibility.",

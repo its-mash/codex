@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use codex_config::types::ApprovalsReviewer;
+use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
@@ -11,6 +12,9 @@ use codex_protocol::approvals::NetworkApprovalContext;
 use codex_protocol::approvals::NetworkApprovalProtocol;
 use codex_protocol::approvals::NetworkPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyRuleAction;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
@@ -19,6 +23,7 @@ use codex_protocol::protocol::ExecApprovalRequestEvent;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::user_input::UserInput;
@@ -590,6 +595,93 @@ async fn user_network_approval_once_session_and_denial_semantics() -> Result<()>
     })
     .await;
     abort_response.single_request();
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires the trusted Linux proxy bridge"
+)]
+async fn latest_network_rejection_wins_for_multiple_reviews_of_one_execution() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses the POSIX/Python network fixture");
+    skip_if_host_windows!(Ok(()));
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let test = managed_network_unified_exec_test(&server).await?;
+    let call_id = "network-multiple-reviews";
+    let second_target = format!("http://{NETWORK_TEST_HOST}:81");
+    let command = format!(
+        "python3 -c \"import threading,urllib.request; threads=[threading.Thread(target=urllib.request.build_opener(urllib.request.ProxyHandler()).open,args=(url,),kwargs={{'timeout': 10}}) for url in ('{NETWORK_TEST_TARGET}','{second_target}')]; [thread.start() for thread in threads]; [thread.join() for thread in threads]\""
+    );
+    let mut args = network_exec_args(&command);
+    args["yield_time_ms"] = json!(10_000);
+    let responses =
+        mount_exec_network_turn(&server, "resp-network-multiple-reviews", call_id, args).await?;
+
+    submit_managed_network_turn(
+        &test,
+        "review both network requests from one execution",
+        vec![local(test.config.cwd.clone())],
+        ApprovalsReviewer::User,
+        AskForApproval::OnRequest,
+    )
+    .await?;
+
+    let mut approvals = Vec::new();
+    for _ in 0..2 {
+        let event = wait_for_event_with_timeout(
+            &test.codex,
+            |event| {
+                matches!(
+                    event,
+                    EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
+                )
+            },
+            Duration::from_secs(30),
+        )
+        .await;
+        let EventMsg::ExecApprovalRequest(approval) = event else {
+            anyhow::bail!("execution completed before both network approvals were requested");
+        };
+        approvals.push(approval);
+    }
+    assert_eq!(approvals[0].turn_id, approvals[1].turn_id);
+    let mut actual_targets = approvals
+        .iter()
+        .map(|approval| approval.command[1].clone())
+        .collect::<Vec<_>>();
+    actual_targets.sort();
+    let mut expected_targets = vec![NETWORK_TEST_TARGET.to_string(), second_target];
+    expected_targets.sort();
+    assert_eq!(actual_targets, expected_targets);
+
+    let first_rejection = "first network approval was rejected";
+    let latest_rejection = "latest network approval was rejected";
+    for (approval, rejection) in approvals
+        .into_iter()
+        .zip([first_rejection, latest_rejection])
+    {
+        test.codex
+            .submit(Op::ExecApproval {
+                id: approval.effective_approval_id(),
+                turn_id: Some(approval.turn_id),
+                decision: ReviewDecision::denied(rejection),
+            })
+            .await?;
+    }
+    wait_for_turn_complete(&test).await;
+
+    let output = responses
+        .requests()
+        .iter()
+        .find_map(|request| request.function_call_output_text(call_id))
+        .context("expected output from the execution with multiple network reviews")?;
+    assert!(output.contains(latest_rejection), "{output}");
+    assert!(!output.contains(first_rejection), "{output}");
 
     Ok(())
 }
@@ -1577,31 +1669,28 @@ async fn submit_managed_network_turn(
         TurnEnvironmentSelections::new(test.config.cwd.clone(), environments);
 
     test.codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
                 text: prompt.into(),
                 text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
                 environments: Some(turn_environment_selections),
                 approval_policy: Some(approval_policy),
                 approvals_reviewer: Some(approvals_reviewer),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,
-                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
-                    mode: codex_protocol::config_types::ModeKind::Default,
-                    settings: codex_protocol::config_types::Settings {
+                collaboration_mode: Some(CollaborationMode {
+                    mode: ModeKind::Default,
+                    settings: Settings {
                         model: test.session_configured.model.clone(),
                         reasoning_effort: None,
                         developer_instructions: None,
                     },
                 }),
                 ..Default::default()
-            },
-        })
+            }),
+        )
         .await?;
 
     Ok(())

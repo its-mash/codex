@@ -2931,6 +2931,7 @@ dependencies = [
  "codex-utils-plugins",
  "dirs",
  "flate2",
+ "futures",
  "http 1.4.0",
  "libc",
  "pretty_assertions",
@@ -2938,6 +2939,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_with",
  "serde_yaml",
  "sha2 0.10.9",
  "tar",
@@ -2949,6 +2951,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "url",
+ "uuid",
  "which 8.0.0",
  "wiremock",
  "zip",
@@ -3641,7 +3644,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "wiremock",
 ]
 
