@@ -78,12 +78,43 @@ The next scheduled run sees a clean tree and resumes. `GITHUB_TOKEN`'s default
 
 ## 2. Install & use
 
-Both platforms consume the **same GitHub Release**; pick your OS below.
+Both platforms consume the **same GitHub Release**. You do **not** need to clone
+this repo — the updater scripts are self-contained. The repo is PUBLIC, so no
+`gh` login or token is needed.
 
-### Linux amd64
+### Install without cloning (recommended)
 
-Auto-update (recommended) — installs the fork release into the standard codex
-standalone layout and keeps it current:
+**Linux amd64** — one command installs the latest fork release and sets up
+`~/.local/bin/codex`; run it again any time to update:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/its-mash/codex/main/fork-tools/codex-update.sh | bash
+```
+
+Add hourly auto-update (systemd --user timer, also no clone):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/its-mash/codex/main/fork-tools/install-updater.sh | bash
+```
+
+**Windows amd64** (PowerShell) — installs to `%LOCALAPPDATA%\codex-fork` and adds
+`codex` to your PATH; re-run to update:
+
+```powershell
+$u='https://raw.githubusercontent.com/its-mash/codex/main/fork-tools/codex-update.ps1'
+irm $u -OutFile "$env:TEMP\codex-update.ps1"; & "$env:TEMP\codex-update.ps1"
+```
+
+> `codex-update.sh` needs `bash`, `curl`, `tar`, `python3`; `codex-update.ps1`
+> needs PowerShell 5+. Neither needs `git`, `gh`, or a clone. After install, open
+> a new terminal so `codex` is on `PATH`.
+
+Then jump to [**Use it**](#use-it). The rest of this section covers cloned-repo
+and fully-manual installs.
+
+### Linux amd64 (from a clone, or manual)
+
+From a clone the same scripts are local:
 
 ```bash
 fork-tools/install-updater.sh          # enable an hourly systemd --user timer
@@ -91,21 +122,25 @@ systemctl --user start codex-update.service   # run once now
 fork-tools/codex-update.sh             # ...or update by hand any time
 ```
 
-It downloads the `*-x86_64-unknown-linux-gnu.tar.gz` asset, extracts to
+The updater downloads the `*-x86_64-unknown-linux-gnu.tar.gz` asset, extracts to
 `~/.codex/packages/standalone/releases/<tag>-<triple>/bin/`, and atomically
-repoints `~/.codex/packages/standalone/current`; your existing
-`~/.local/bin/codex -> current/bin/codex` symlink follows. Uninstall the timer
-with `fork-tools/install-updater.sh --uninstall`.
+repoints `~/.codex/packages/standalone/current`; `~/.local/bin/codex ->
+current/bin/codex` follows. Uninstall the timer with
+`fork-tools/install-updater.sh --uninstall`.
 
-Manual install (no scripts):
+Fully manual (no scripts at all):
 
 ```bash
+# pick the newest release from https://github.com/its-mash/codex/releases/latest
+curl -fsSLO https://github.com/its-mash/codex/releases/latest/download/  # (see assets)
+# ...or with gh:
 gh release download --repo its-mash/codex --pattern '*-x86_64-unknown-linux-gnu.tar.gz'
 tar -xzf codex-*-x86_64-unknown-linux-gnu.tar.gz
 install -Dm755 codex-*/bin/codex ~/.local/bin/codex
 install -Dm755 codex-*/bin/codex-code-mode-host ~/.local/bin/codex-code-mode-host
 ```
 
+<a id="use-it"></a>
 Use it:
 
 ```bash
@@ -115,24 +150,25 @@ codex exec "…"              # non-interactive
 codex teammate --team-name <team> --agent-name <name>   # native team member
 ```
 
-### Windows amd64
+### Windows amd64 (from a clone, or manual)
 
-Auto-update (recommended) — no admin, no `gh` needed (public repo):
+From a clone (the no-clone one-liner is above):
 
 ```powershell
 pwsh -File fork-tools\codex-update.ps1
 ```
 
-It downloads the `*-x86_64-pc-windows-msvc.zip` asset, verifies its `.sha256`,
-extracts to `%LOCALAPPDATA%\codex-fork\releases\<tag>-<triple>\`, repoints the
-`%LOCALAPPDATA%\codex-fork\current` junction, and adds `current\bin` to your user
-`PATH` (open a new terminal afterward). Run it again any time to pick up the
-latest release. To update on a schedule, register a daily Scheduled Task:
+The updater downloads the `*-x86_64-pc-windows-msvc.zip` asset, verifies its
+`.sha256`, extracts to `%LOCALAPPDATA%\codex-fork\releases\<tag>-<triple>\`,
+repoints the `%LOCALAPPDATA%\codex-fork\current` junction, and adds `current\bin`
+to your user `PATH` (open a new terminal afterward). Run it again any time to
+pick up the latest release. To update on a schedule, register a daily Scheduled
+Task that fetches + runs the script (no clone needed):
 
 ```powershell
-$ps  = (Get-Command pwsh).Source
-$job = Join-Path $PWD 'fork-tools\codex-update.ps1'
-$act = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -File `"$job`""
+$dst = "$env:LOCALAPPDATA\codex-fork\codex-update.ps1"
+$cmd = "irm https://raw.githubusercontent.com/its-mash/codex/main/fork-tools/codex-update.ps1 -OutFile `"$dst`"; & `"$dst`""
+$act = New-ScheduledTaskAction -Execute (Get-Command pwsh).Source -Argument "-NoProfile -Command `"$cmd`""
 $trg = New-ScheduledTaskTrigger -Daily -At 9am
 Register-ScheduledTask -TaskName 'codex-fork-update' -Action $act -Trigger $trg
 ```

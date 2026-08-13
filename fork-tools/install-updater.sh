@@ -2,26 +2,38 @@
 # install-updater.sh — install a systemd --user timer that keeps the local codex
 # install on the fork's latest GitHub Release (see codex-update.sh).
 #
+# Works with OR without cloning the repo. No clone:
+#   curl -fsSL https://raw.githubusercontent.com/its-mash/codex/main/fork-tools/install-updater.sh | bash
+#
 # Usage:
 #   fork-tools/install-updater.sh            # install + enable hourly timer
 #   fork-tools/install-updater.sh --uninstall
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" 2>/dev/null && pwd || echo "")"
 UNIT_DIR="$HOME/.config/systemd/user"
 INTERVAL="${CODEX_UPDATE_INTERVAL:-hourly}" # onCalendar spec, e.g. hourly / *:0/30
-UPDATER="$HERE/codex-update.sh"
+RAW_BASE="${CODEX_FORK_RAW_BASE:-https://raw.githubusercontent.com/its-mash/codex/main/fork-tools}"
+
+# The timer must point at a stable path, independent of any clone. Install the
+# updater to the state dir: copy a sibling (cloned repo) or fetch it (no clone).
+UPDATER="$HOME/.codex-fork-sync/codex-update.sh"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   systemctl --user disable --now codex-update.timer 2>/dev/null || true
   rm -f "$UNIT_DIR/codex-update.service" "$UNIT_DIR/codex-update.timer"
   systemctl --user daemon-reload
-  echo "codex-update timer removed."
+  echo "codex-update timer removed (kept $UPDATER)."
   exit 0
 fi
 
-chmod +x "$UPDATER" "$HERE/codex-update.sh"
-mkdir -p "$UNIT_DIR"
+mkdir -p "$(dirname "$UPDATER")" "$UNIT_DIR"
+if [[ -n "$HERE" && -f "$HERE/codex-update.sh" ]]; then
+  cp -f "$HERE/codex-update.sh" "$UPDATER"
+else
+  curl -fsSL "$RAW_BASE/codex-update.sh" -o "$UPDATER"
+fi
+chmod +x "$UPDATER"
 
 cat > "$UNIT_DIR/codex-update.service" <<EOF
 [Unit]
