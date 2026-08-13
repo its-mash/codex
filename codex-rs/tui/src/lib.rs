@@ -3165,7 +3165,7 @@ mod tests {
                 let preview = crate::resume_picker::load_transcript_preview(
                     &mut app_server,
                     thread_id,
-                    /*codex_home*/ None,
+                    /*config*/ None,
                 )
                 .await?;
                 assert!(!preview.is_empty());
@@ -3174,7 +3174,7 @@ mod tests {
                 &mut app_server,
                 thread_id,
                 crate::thread_transcript::RawReasoningVisibility::Hidden,
-                /*codex_home*/ None,
+                /*config*/ None,
             )
             .await?;
             assert!(cells.len() > 100);
