@@ -30,6 +30,9 @@ impl MessageDeliveryMode {
 #[serde(deny_unknown_fields)]
 /// Input for the MultiAgentV2 `send_message` tool.
 pub(crate) struct SendMessageArgs {
+    // `to` is Claude Code's `SendMessage` field name; accept it so instructions
+    // authored for Claude resolve verbatim on a native Codex teammate.
+    #[serde(alias = "to")]
     pub(crate) target: String,
     pub(crate) message: String,
 }
@@ -38,6 +41,7 @@ pub(crate) struct SendMessageArgs {
 #[serde(deny_unknown_fields)]
 /// Input for the MultiAgentV2 `followup_task` tool.
 pub(crate) struct FollowupTaskArgs {
+    #[serde(alias = "to")]
     pub(crate) target: String,
     pub(crate) message: String,
 }
@@ -155,4 +159,35 @@ pub(crate) async fn handle_message_string_tool(
     .await;
 
     Ok(FunctionToolOutput::from_text(String::new(), Some(true)))
+}
+
+#[cfg(test)]
+mod claude_field_alias_tests {
+    use super::FollowupTaskArgs;
+    use super::SendMessageArgs;
+
+    #[test]
+    fn send_message_accepts_claude_to_field() {
+        let args: SendMessageArgs =
+            serde_json::from_value(serde_json::json!({"to": "team-lead", "message": "hi"}))
+                .expect("Claude `to` payload should deserialize");
+        assert_eq!(args.target, "team-lead");
+        assert_eq!(args.message, "hi");
+    }
+
+    #[test]
+    fn send_message_still_accepts_native_target_field() {
+        let args: SendMessageArgs =
+            serde_json::from_value(serde_json::json!({"target": "claude-peer", "message": "yo"}))
+                .expect("native `target` payload should deserialize");
+        assert_eq!(args.target, "claude-peer");
+    }
+
+    #[test]
+    fn followup_task_accepts_claude_to_field() {
+        let args: FollowupTaskArgs =
+            serde_json::from_value(serde_json::json!({"to": "codex-worker", "message": "wake"}))
+                .expect("Claude `to` payload should deserialize");
+        assert_eq!(args.target, "codex-worker");
+    }
 }
