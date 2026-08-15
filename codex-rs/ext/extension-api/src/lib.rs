@@ -7,6 +7,7 @@ mod user_instructions;
 
 pub use capabilities::AgentSpawnFuture;
 pub use capabilities::AgentSpawner;
+pub use capabilities::ConversationHistorySnapshot;
 pub use capabilities::ExtensionEventSink;
 pub use capabilities::ExtensionMetrics;
 pub use capabilities::ExtensionWarning;
@@ -16,6 +17,7 @@ pub use capabilities::ResponseItemInjectionFuture;
 pub use capabilities::ResponseItemInjector;
 pub use codex_context_fragments::ContextualUserFragment;
 pub use codex_protocol::models::ResponseItem;
+pub use codex_protocol::security_risk::SecurityRiskScore;
 pub use codex_tools::ConversationHistory;
 pub use codex_tools::ExtensionTurnItem;
 pub use codex_tools::FunctionCallError;
