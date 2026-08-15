@@ -84,7 +84,22 @@ jobs:
           fi
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           git fetch --no-tags upstream "refs/tags/${release_tag}:refs/tags/${release_tag}"
-          release_commit="$(git rev-parse "${release_tag}^{commit}")"
+          tag_commit="$(git rev-parse "${release_tag}^{commit}")"
+          # Upstream cuts a release as a side commit off main whose ONLY change is
+          # the workspace version stamp (`version = "0.0.0"` -> `"0.147.0"`; verified
+          # for v0.145.0..v0.147.0). Merge the commit that release was cut FROM: the
+          # fork then tracks exactly the released code, while not importing a version
+          # line the fork does not use and which would otherwise conflict on every
+          # later release (base 0.0.0 vs ours 0.147.0 vs theirs 0.148.0). If a release
+          # commit ever carries real content, merge the release commit itself.
+          stamp_only="$(git show --pretty=format: --name-only "$tag_commit" | grep -v '^$' | paste -sd, -)"
+          if [ "$stamp_only" = "codex-rs/Cargo.toml" ]; then
+            release_commit="$(git rev-parse "${tag_commit}^1")"
+            echo "Release ${release_tag} is a version stamp; syncing its release point $release_commit."
+          else
+            release_commit="$tag_commit"
+            echo "Release ${release_tag} carries content ($stamp_only); syncing the release commit."
+          fi
           if git merge-base --is-ancestor "$release_commit" HEAD; then
             echo "Already contains upstream release ${release_tag}; nothing to sync."
             exit 0
@@ -92,7 +107,7 @@ jobs:
           behind="$(git rev-list --count "HEAD..${release_commit}")"
           echo "behind=$behind" >> "$GITHUB_OUTPUT"
           echo "Merging upstream release ${release_tag} ($behind commit(s))."
-          if git merge --no-edit "$release_tag"; then
+          if git merge --no-edit -m "Merge upstream release ${release_tag}" "$release_commit"; then
             echo "Clean merge of ${release_tag}."
             git push origin main
           else
@@ -130,8 +145,9 @@ jobs:
           ### Resolve locally
           \`\`\`bash
           cd /home/benty/codex
-          git fetch --no-tags upstream "refs/tags/${RELEASE_TAG:-<tag>}:refs/tags/${RELEASE_TAG:-<tag>}"
-          git merge ${RELEASE_TAG:-<tag>}    # resolve the conflicts it reports
+          tag=${RELEASE_TAG:-<tag>}
+          git fetch --no-tags upstream "refs/tags/\$tag:refs/tags/\$tag"
+          git merge "\$tag^1"                # the release point; resolve the conflicts
           git add -A && git commit           # completes the merge
           git push origin main               # this push builds + publishes a release
           \`\`\`

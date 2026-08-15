@@ -13,13 +13,20 @@ mean **no sync**. Implemented in `.github/workflows/fork-sync-release.yml`
 (`sync` job, every 6h + `[sync]`-marked pushes); details and the conflict-fix
 flow are in `fork-tools/README.md`.
 
-To sync/merge upstream manually, target the release tag, never `upstream/main`:
+To sync/merge upstream manually, target the release, never `upstream/main`:
 
 ```bash
 tag=$(gh release view --repo openai/codex --json tagName --jq .tagName)
 git fetch --no-tags upstream "refs/tags/$tag:refs/tags/$tag"
-git merge "$tag"
+git merge "$tag^1"   # ^1 = the release point (see below)
 ```
+
+Merge `"$tag^1"`, not the tag: upstream cuts a release as a side commit off `main`
+whose only change is the workspace version stamp (`version = "0.0.0"` → `"0.147.0"`).
+Merging the stamp would conflict on that line at every later release (base `0.0.0`
+vs ours `0.147.0` vs theirs `0.148.0`), and the fork does not use that version — it
+ships `fork-<date>-<sha>` releases. Merge the tag commit itself only if a release
+ever changes files other than `codex-rs/Cargo.toml`.
 
 Never run the built-in `codex update` on this machine — it installs OpenAI's
 official release and reverts the fork. The local install auto-updates from this

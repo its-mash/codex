@@ -30,6 +30,12 @@ This fork stays current with `openai/codex` and ships installable builds for
    `releases/latest`; `rust-v*-alpha.*` prereleases are ignored) into this fork's
    `main`. Upstream `main` commits without a new stable release are **not**
    synced — the fork only moves at upstream release points.
+   - Upstream cuts a release as a side commit off `main` whose only change is the
+     workspace **version stamp** (`version = "0.0.0"` → `"0.147.0"`). The job merges
+     the commit that release was cut *from*, so the fork gets exactly the released
+     code without importing a version line it does not use — and which would
+     otherwise conflict on every later release. If a release commit ever carries
+     real content, that commit is merged instead.
    - **Already contains the release / no new release** → nothing to do.
    - **Clean merge** → pushes `main`.
    - **Conflict** → the merge is aborted in CI, the fix steps are written to the
@@ -73,7 +79,7 @@ files and these steps. Resolve on the machine that holds the clone:
 cd /home/benty/codex               # 'upstream' remote = openai/codex
 tag=$(gh release view --repo openai/codex --json tagName --jq .tagName)
 git fetch --no-tags upstream "refs/tags/$tag:refs/tags/$tag"
-git merge "$tag"                   # resolve the conflicts it reports
+git merge "$tag^1"                 # the release point; resolve the conflicts
 git add -A && git commit           # completes the merge
 git push origin main               # this push builds + publishes a release
 ```
