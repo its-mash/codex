@@ -9,7 +9,11 @@ name: fork-sync-release
 #                         release do NOT trigger a sync.
 #       clean merge     -> push, then build + publish a GitHub Release
 #       conflict        -> write fix steps to the run summary, fail the run (email)
-#   push to main       -> (your conflict fix lands here) build + publish if HEAD is unreleased
+#   push to main       -> (your conflict fix lands here) build + publish if HEAD is
+#                         unreleased AND codex-rs/ changed since the last release
+#
+# Each platform uploads its own assets as soon as it finishes building, so the
+# faster Linux build is never gated behind the slower Windows one.
 #
 # The local machine only consumes the published Release (see fork-tools/), exactly
 # like the official codex auto-update flow.
@@ -25,14 +29,20 @@ on:
         default: false
   push:
     branches: [main]
+    # None of these land in a binary, so they must never cost a build. Workflow
+    # edits included: they are exercised by the next scheduled run, and `prepare`
+    # skips the build anyway when codex-rs/ is unchanged since the last release.
     paths-ignore:
       - "design/**"
       - "fork-tools/**"
+      - ".github/workflows/**"
       - "**/*.md"
 
 concurrency:
   group: fork-sync-release
-  cancel-in-progress: false
+  # A newer push supersedes an in-flight push run (its build is already stale).
+  # Scheduled syncs are never cancelled: they may be mid-merge/push of upstream.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: write
@@ -193,6 +203,17 @@ jobs:
           if gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
               --json tagName --jq '.[].tagName' 2>/dev/null | grep -q -- "-$short\$"; then
             echo "HEAD $short already released; skipping."
+            echo "needed=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Nothing that lands in a binary changed since the last release? Then a
+          # rebuild would be byte-for-byte pointless (docs, workflow, fork-tools
+          # commits) — a full build is ~35-70 min, so skip it.
+          last="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 \
+                    --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
+          last_sha="${last##*-}"
+          if [ -n "$last_sha" ] && git cat-file -e "${last_sha}^{commit}" 2>/dev/null \
+             && git diff --quiet "$last_sha" HEAD -- codex-rs; then
+            echo "No codex-rs/ changes since ${last}; skipping build."
             echo "needed=0" >> "$GITHUB_OUTPUT"
           else
             echo "needed=1" >> "$GITHUB_OUTPUT"
@@ -212,6 +233,17 @@ jobs:
             os: windows-latest
             archive: zip
     runs-on: ${{ matrix.os }}
+    env:
+      # The fork's packaging copies binaries as-is and archives no sidecar
+      # symbols, so upstream's release debug info is pure cost here: it made
+      # `codex` 1.2 GB of which only 238 MB is code. Dropping debug info and
+      # thin LTO (and raising codegen-units) is the difference between a ~35-70
+      # min build and roughly half that, and shrinks the download users pull.
+      # Trade-off: panics lose file:line, binaries are slightly larger/slower.
+      # To restore upstream behaviour, delete these three variables.
+      CARGO_PROFILE_RELEASE_DEBUG: "false"
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       - name: Checkout synced main
         uses: actions/checkout@v4
@@ -298,46 +330,29 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  publish:
-    needs: [prepare, build]
-    # always() so a single-platform build failure still ships the platform that
-    # succeeded (the run still reports failure -> notification email). Skips only
-    # when no release is needed or nothing built.
-    if: always() && needs.prepare.outputs.needed == '1'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Publish GitHub Release
+      - name: Publish this platform's assets
+        # Each platform ships the moment it is built instead of waiting for the
+        # other: Linux (~2x faster than Windows) no longer sits idle behind the
+        # Windows build, so the machine that consumes it can update much sooner.
+        # Release creation is idempotent — whichever platform finishes first
+        # creates it, the other just uploads into it.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
           SHORT: ${{ needs.prepare.outputs.short_sha }}
         run: |
           set -euo pipefail
-          mapfile -t files < <(find dist -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) 2>/dev/null || true)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No build artifacts to publish (all platform builds failed)."
-            exit 0
-          fi
-          have_linux=$(printf '%s\n' "${files[@]}" | grep -c 'x86_64-unknown-linux-gnu.tar.gz$' || true)
-          have_windows=$(printf '%s\n' "${files[@]}" | grep -c 'x86_64-pc-windows-msvc.zip$' || true)
-          notes=$(cat <<EOF
-          Automated fork release built from this fork's \`main\` at commit \`${SHORT}\`,
+          notes="Automated fork release built from this fork's \`main\` at commit \`${SHORT}\`,
           which tracks the latest stable \`openai/codex\` release plus this fork's changes.
 
-          Assets in this release:
-          - Linux amd64 (\`x86_64-unknown-linux-gnu\`): $( [ "$have_linux" != 0 ] && echo 'included (.tar.gz)' || echo 'MISSING — build failed' )
-          - Windows amd64 (\`x86_64-pc-windows-msvc\`): $( [ "$have_windows" != 0 ] && echo 'included (.zip)' || echo 'MISSING — build failed' )
+          Assets are uploaded per platform as each build finishes:
+          - Linux amd64: \`*-x86_64-unknown-linux-gnu.tar.gz\`
+          - Windows amd64: \`*-x86_64-pc-windows-msvc.zip\`
 
-          Install / use on both platforms: see \`fork-tools/README.md\`.
-          EOF
-          )
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" \
-            --notes "$notes" \
-            "${files[@]}"
+          A platform whose build failed is simply absent (the run is marked failed).
+          Install / use on both platforms: see \`fork-tools/README.md\`."
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" --notes "$notes" 2>/dev/null \
+            || echo "Release $TAG already exists; uploading into it."
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*

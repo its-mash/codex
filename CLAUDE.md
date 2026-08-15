@@ -54,6 +54,18 @@ Main fork-owned areas: `codex-rs/ext/automation`, `codex-rs/ext/external-team`,
 `codex-rs/tui/src/{app/external_team.rs,app/loop_actions.rs,loop_command.rs,`
 `chatwidget/inbound_inter_agent.rs,chatwidget/loop_slash.rs,app_server_session/loop_automation.rs}`.
 
+## Release CI
+
+A release is dominated by the Rust build (Linux ~34 min, Windows ~65 min before
+tuning). The workflow therefore: publishes each platform's assets as soon as that
+platform builds (Linux never waits for Windows); builds with
+`CARGO_PROFILE_RELEASE_DEBUG=false` + `LTO=false` + `CODEGEN_UNITS=16` (the fork
+archives no sidecar symbols, so upstream's debug info was ~80% of a 1.2 GB
+binary for no benefit); skips the build when `codex-rs/` is unchanged since the
+last release; and ignores pushes that touch only docs, `fork-tools/**`, or
+`.github/workflows/**`. Do not "fix" the release profile in `codex-rs/Cargo.toml`
+— it is upstream-owned; the overrides live in the workflow's `build` job env.
+
 ## Regenerating generated artifacts (never hand-merge these)
 
 - App-server schema `.zst` + fixtures:

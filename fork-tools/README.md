@@ -46,9 +46,29 @@ This fork stays current with `openai/codex` and ships installable builds for
    `x86_64-pc-windows-msvc` (on `windows-latest`), builds `codex` and
    `codex-code-mode-host` and packages `bin/` into a `.tar.gz` (Linux) or `.zip`
    (Windows), each with a `.sha256`.
-3. **publish** — attaches both platforms' archives to one GitHub Release
-   (`fork-<date>-<sha>`). If one platform's build fails, the other still ships and
-   the run is marked failed so you get notified.
+3. **publish** — each build job uploads its own archives to the shared
+   `fork-<date>-<sha>` Release **as soon as that platform finishes**, so the Linux
+   build (~2x faster than Windows) is never gated behind Windows. Whichever
+   platform finishes first creates the Release; the other uploads into it. A
+   platform whose build failed is simply absent and the run is marked failed.
+
+### Build speed
+
+A full build is the whole cost of a release, so the workflow trims it:
+
+- **No release debug info** (`CARGO_PROFILE_RELEASE_DEBUG=false`, plus `LTO=false`
+  and `CODEGEN_UNITS=16`, set only in CI). Upstream keeps `debug =
+  "line-tables-only"`/`strip = false` because its packaging archives sidecar
+  symbols and then strips; this fork's packaging does neither, so that debug info
+  was pure cost — it made `codex` 1.2 GB of which only 238 MB is code. Trade-off:
+  panics lose `file:line` and binaries are slightly larger/slower. Delete those
+  three env vars in the `build` job to restore upstream behaviour.
+- **No build for non-binary commits.** `prepare` skips the build when `codex-rs/`
+  is unchanged since the last release, and pushes touching only `design/**`,
+  `fork-tools/**`, `.github/workflows/**`, or `*.md` do not start a run at all.
+- **Superseded pushes are cancelled** (`cancel-in-progress` for `push` only), so a
+  stale build never blocks the queue. Scheduled syncs are never cancelled — they
+  may be mid-merge.
 
 `rerere` is enabled in CI and locally, so a conflict you resolve once is replayed
 automatically the next time the same hunk conflicts.
