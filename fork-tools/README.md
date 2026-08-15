@@ -5,7 +5,7 @@ This fork stays current with `openai/codex` and ships installable builds for
 
 ```
  openai/codex ─(every 6h)─► GitHub Actions on its-mash/codex ─► GitHub Release
-        merge into this fork's main       build both platforms:      │
+   merge latest STABLE upstream release   build both platforms:      │
                 │                          Linux amd64 (.tar.gz)      │
          conflict? run summary + fail      Windows amd64 (.zip)       ▼
          (you resolve locally, push)                    your machine auto-updates:
@@ -26,7 +26,11 @@ This fork stays current with `openai/codex` and ships installable builds for
 `fork-sync-release.yml` runs every 6 hours (and on manual dispatch). Its jobs are
 `sync` → `prepare` → `build` (a Linux + Windows matrix) → `publish`:
 
-1. **sync** — merges the latest `openai/codex` `main` into this fork's `main`.
+1. **sync** — merges the **latest stable `openai/codex` release** (the tag behind
+   `releases/latest`; `rust-v*-alpha.*` prereleases are ignored) into this fork's
+   `main`. Upstream `main` commits without a new stable release are **not**
+   synced — the fork only moves at upstream release points.
+   - **Already contains the release / no new release** → nothing to do.
    - **Clean merge** → pushes `main`.
    - **Conflict** → the merge is aborted in CI, the fix steps are written to the
      run **summary**, and the run **fails** so GitHub emails you. (The fork has
@@ -66,11 +70,12 @@ You get a failed-run email; open the run and its **summary** shows the conflicti
 files and these steps. Resolve on the machine that holds the clone:
 
 ```bash
-cd /home/benty/codex
-git fetch upstream main          # 'upstream' remote = openai/codex
-git merge upstream/main          # resolve the conflicts it reports
-git add -A && git commit         # completes the merge
-git push origin main             # this push builds + publishes a release
+cd /home/benty/codex               # 'upstream' remote = openai/codex
+tag=$(gh release view --repo openai/codex --json tagName --jq .tagName)
+git fetch --no-tags upstream "refs/tags/$tag:refs/tags/$tag"
+git merge "$tag"                   # resolve the conflicts it reports
+git add -A && git commit           # completes the merge
+git push origin main               # this push builds + publishes a release
 ```
 
 The next scheduled run sees a clean tree and resumes. `GITHUB_TOKEN`'s default

@@ -3,7 +3,10 @@ name: fork-sync-release
 # Keep this fork riding on top of openai/codex and publish installable releases
 # for Linux amd64 and Windows amd64.
 #
-#   schedule / manual  -> merge openai/codex main into this fork's main
+#   schedule / manual  -> merge the latest STABLE openai/codex release (tag from
+#                         releases/latest; alpha prereleases are ignored) into
+#                         this fork's main. Upstream commits without a new
+#                         release do NOT trigger a sync.
 #       clean merge     -> push, then build + publish a GitHub Release
 #       conflict        -> write fix steps to the run summary, fail the run (email)
 #   push to main       -> (your conflict fix lands here) build + publish if HEAD is unreleased
@@ -56,27 +59,41 @@ jobs:
           git config user.email "fork-sync-bot@users.noreply.github.com"
           git config rerere.enabled true
 
-      - name: Merge latest openai/codex
+      - name: Merge latest openai/codex release
         # Runs on schedule/dispatch. Also on a push whose commit message contains
         # `[sync]`, which is the manual trigger when workflow_dispatch is not
         # available (e.g. a non-admin token). Ordinary pushes skip the merge.
+        #
+        # Sync policy: track the latest STABLE upstream release only
+        # (`gh release view` resolves releases/latest, which excludes prereleases
+        # and drafts — codex's near-daily `rust-v*-alpha.*` tags never match).
+        # Upstream main commits without a new release are intentionally ignored.
         if: >-
           github.event_name != 'push' ||
           contains(github.event.head_commit.message, '[sync]')
         id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
-          git fetch --prune upstream main
-          behind="$(git rev-list --count HEAD..upstream/main)"
-          echo "behind=$behind" >> "$GITHUB_OUTPUT"
-          if [ "$behind" = "0" ]; then
-            echo "Already up to date with openai/codex."
+          release_tag="$(gh release view --repo openai/codex --json tagName --jq .tagName)"
+          if [ -z "$release_tag" ]; then
+            echo "::error::Could not resolve the latest openai/codex release."
+            exit 1
+          fi
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags upstream "refs/tags/${release_tag}:refs/tags/${release_tag}"
+          release_commit="$(git rev-parse "${release_tag}^{commit}")"
+          if git merge-base --is-ancestor "$release_commit" HEAD; then
+            echo "Already contains upstream release ${release_tag}; nothing to sync."
             exit 0
           fi
-          echo "Merging $behind upstream commit(s)."
-          if git merge --no-edit upstream/main; then
-            echo "Clean merge."
+          behind="$(git rev-list --count "HEAD..${release_commit}")"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "Merging upstream release ${release_tag} ($behind commit(s))."
+          if git merge --no-edit "$release_tag"; then
+            echo "Clean merge of ${release_tag}."
             git push origin main
           else
             conflicts="$(git diff --name-only --diff-filter=U | paste -sd', ' - || true)"
@@ -98,12 +115,14 @@ jobs:
         env:
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
           BEHIND: ${{ steps.merge.outputs.behind }}
+          RELEASE_TAG: ${{ steps.merge.outputs.release_tag }}
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## ⚠️ Upstream sync conflict — auto-sync paused
 
-          The fork could not merge \`openai/codex\` main cleanly, so this run failed
-          (you get the failed-run email). Resolve it locally and the next run resumes.
+          The fork could not merge the upstream release \`${RELEASE_TAG:-?}\` cleanly, so
+          this run failed (you get the failed-run email). Resolve it locally and the
+          next run resumes.
 
           - **Conflicting files:** ${CONFLICTS:-<none reported>}
           - **Upstream commits behind:** ${BEHIND:-?}
@@ -111,8 +130,8 @@ jobs:
           ### Resolve locally
           \`\`\`bash
           cd /home/benty/codex
-          git fetch upstream main            # remote 'upstream' -> openai/codex
-          git merge upstream/main            # resolve the conflicts it reports
+          git fetch --no-tags upstream "refs/tags/${RELEASE_TAG:-<tag>}:refs/tags/${RELEASE_TAG:-<tag>}"
+          git merge ${RELEASE_TAG:-<tag>}    # resolve the conflicts it reports
           git add -A && git commit           # completes the merge
           git push origin main               # this push builds + publishes a release
           \`\`\`
@@ -292,7 +311,7 @@ jobs:
           have_windows=$(printf '%s\n' "${files[@]}" | grep -c 'x86_64-pc-windows-msvc.zip$' || true)
           notes=$(cat <<EOF
           Automated fork release built from this fork's \`main\` at commit \`${SHORT}\`,
-          which tracks the latest \`openai/codex\` main plus this fork's changes.
+          which tracks the latest stable \`openai/codex\` release plus this fork's changes.
 
           Assets in this release:
           - Linux amd64 (\`x86_64-unknown-linux-gnu\`): $( [ "$have_linux" != 0 ] && echo 'included (.tar.gz)' || echo 'MISSING — build failed' )
