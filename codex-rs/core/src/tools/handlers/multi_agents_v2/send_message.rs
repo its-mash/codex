@@ -2,27 +2,10 @@ use super::message_tool::MessageDeliveryMode;
 use super::message_tool::SendMessageArgs;
 use super::message_tool::handle_message_string_tool;
 use super::*;
-use crate::tools::handlers::multi_agents_spec::MessageArgumentEncoding;
 use crate::tools::handlers::multi_agents_spec::create_send_message_tool;
 use codex_tools::ToolSpec;
 
-pub(crate) struct Handler {
-    message_encoding: MessageArgumentEncoding,
-}
-
-impl Handler {
-    pub(crate) const fn encrypted() -> Self {
-        Self {
-            message_encoding: MessageArgumentEncoding::Encrypted,
-        }
-    }
-
-    pub(crate) const fn plaintext() -> Self {
-        Self {
-            message_encoding: MessageArgumentEncoding::Plaintext,
-        }
-    }
-}
+pub(crate) struct Handler;
 
 impl ToolExecutor<ToolInvocation> for Handler {
     fn tool_name(&self) -> ToolName {
@@ -30,7 +13,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_send_message_tool(self.message_encoding)
+        create_send_message_tool()
     }
 
     fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
@@ -50,7 +33,6 @@ impl Handler {
             MessageDeliveryMode::QueueOnly,
             args.target,
             args.message,
-            self.message_encoding,
         )
         .await
         .map(boxed_tool_output)

@@ -3,13 +3,13 @@
 //! `send_message` and `followup_task` share the same submission path and differ only in whether the
 //! resulting `InterAgentCommunication` should wake the target immediately.
 
+use super::external_team;
+use super::external_team::ResolvedAgentTarget;
+use super::external_team::resolve_agent_target_or_external;
 use super::*;
-use crate::agent::agent_resolver::ResolvedAgentTarget;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::tools::context::FunctionToolOutput;
-use crate::tools::handlers::multi_agents_spec::MessageArgumentEncoding;
-use codex_extension_api::ExternalMessageDelivery;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MessageDeliveryMode {
@@ -30,9 +30,7 @@ impl MessageDeliveryMode {
 #[serde(deny_unknown_fields)]
 /// Input for the MultiAgentV2 `send_message` tool.
 pub(crate) struct SendMessageArgs {
-    // `to` is Claude Code's `SendMessage` field name; accept it so instructions
-    // authored for Claude resolve verbatim on a native Codex teammate.
-    #[serde(alias = "to")]
+    #[serde(alias = "to")] // fork: accept Claude Code's `SendMessage` field name
     pub(crate) target: String,
     pub(crate) message: String,
 }
@@ -41,7 +39,7 @@ pub(crate) struct SendMessageArgs {
 #[serde(deny_unknown_fields)]
 /// Input for the MultiAgentV2 `followup_task` tool.
 pub(crate) struct FollowupTaskArgs {
-    #[serde(alias = "to")]
+    #[serde(alias = "to")] // fork: accept Claude Code's `SendMessage` field name
     pub(crate) target: String,
     pub(crate) message: String,
 }
@@ -61,7 +59,6 @@ pub(crate) async fn handle_message_string_tool(
     mode: MessageDeliveryMode,
     target: String,
     message: String,
-    message_encoding: MessageArgumentEncoding,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
     let message = message_content(message)?;
     let ToolInvocation {
@@ -72,22 +69,13 @@ pub(crate) async fn handle_message_string_tool(
         source,
         ..
     } = invocation;
-    let receiver = resolve_agent_target(&session, &turn, &target).await?;
-    let receiver_thread_id = match receiver {
-        ResolvedAgentTarget::Local(receiver_thread_id) => receiver_thread_id,
-        ResolvedAgentTarget::External { handle, agent } => {
-            let delivery = match mode {
-                MessageDeliveryMode::QueueOnly => ExternalMessageDelivery::Queue,
-                MessageDeliveryMode::TriggerTurn => ExternalMessageDelivery::Wake,
-            };
-            handle
-                .provider()
-                .send_message(&agent, &message, delivery)
-                .await
-                .map_err(FunctionCallError::RespondToModel)?;
-            return Ok(FunctionToolOutput::from_text(String::new(), Some(true)));
-        }
-    };
+    let receiver_thread_id =
+        match resolve_agent_target_or_external(&session, &turn, &target).await? {
+            ResolvedAgentTarget::Local(thread_id) => thread_id,
+            ResolvedAgentTarget::External { handle, agent } => {
+                return external_team::deliver_message(handle, agent, &message, mode).await;
+            }
+        };
     let receiver_agent = session
         .services
         .agent_control
@@ -123,7 +111,6 @@ pub(crate) async fn handle_message_string_tool(
         receiver_agent_path.clone(),
         message,
         &source,
-        message_encoding,
         mode.trigger_turn(),
     );
     let kind = match mode {
@@ -159,35 +146,4 @@ pub(crate) async fn handle_message_string_tool(
     .await;
 
     Ok(FunctionToolOutput::from_text(String::new(), Some(true)))
-}
-
-#[cfg(test)]
-mod claude_field_alias_tests {
-    use super::FollowupTaskArgs;
-    use super::SendMessageArgs;
-
-    #[test]
-    fn send_message_accepts_claude_to_field() {
-        let args: SendMessageArgs =
-            serde_json::from_value(serde_json::json!({"to": "team-lead", "message": "hi"}))
-                .expect("Claude `to` payload should deserialize");
-        assert_eq!(args.target, "team-lead");
-        assert_eq!(args.message, "hi");
-    }
-
-    #[test]
-    fn send_message_still_accepts_native_target_field() {
-        let args: SendMessageArgs =
-            serde_json::from_value(serde_json::json!({"target": "claude-peer", "message": "yo"}))
-                .expect("native `target` payload should deserialize");
-        assert_eq!(args.target, "claude-peer");
-    }
-
-    #[test]
-    fn followup_task_accepts_claude_to_field() {
-        let args: FollowupTaskArgs =
-            serde_json::from_value(serde_json::json!({"to": "codex-worker", "message": "wake"}))
-                .expect("Claude `to` payload should deserialize");
-        assert_eq!(args.target, "codex-worker");
-    }
 }

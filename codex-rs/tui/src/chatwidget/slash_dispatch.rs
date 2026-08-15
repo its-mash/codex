@@ -14,7 +14,6 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
-use crate::loop_command::parse_loop_command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlashCommandDispatchSource {
@@ -99,22 +98,6 @@ impl ChatWidget {
                 /*hint*/ None,
             );
             false
-        }
-    }
-
-    fn dispatch_loop_command(&mut self, args: &str) {
-        match parse_loop_command(args) {
-            Ok(action) => {
-                let Some(thread_id) = self.thread_id else {
-                    self.add_error_message(
-                        "Session is still starting; try /loop again in a moment.".to_string(),
-                    );
-                    return;
-                };
-                self.app_event_tx
-                    .send(AppEvent::LoopCommand { thread_id, action });
-            }
-            Err(error) => self.add_error_message(error),
         }
     }
 
@@ -326,9 +309,7 @@ impl ChatWidget {
                     );
                 }
             }
-            SlashCommand::Loop => {
-                self.dispatch_loop_command("");
-            }
+            SlashCommand::Loop => self.dispatch_loop_command(""),
             SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
             }
@@ -911,9 +892,7 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Loop if !trimmed.is_empty() => {
-                self.dispatch_loop_command(trimmed);
-            }
+            SlashCommand::Loop if !trimmed.is_empty() => self.dispatch_loop_command(trimmed),
             SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
                 let Some(parent_thread_id) = self.thread_id else {
                     let command = cmd.command();

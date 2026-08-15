@@ -1,7 +1,7 @@
 use chrono::Duration;
 use chrono::Utc;
-use std::collections::HashSet;
 use pretty_assertions::assert_eq;
+use std::collections::HashSet;
 use tempfile::TempDir;
 
 use super::AutomationKind;

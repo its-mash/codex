@@ -147,29 +147,12 @@ pub struct OrchestratorFeatureToml {
     pub enabled: Option<bool>,
 }
 
-/// Configuration for joining a team whose control plane is owned by another agent runtime.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct ExternalTeamConfigToml {
-    pub provider: String,
-    pub team_name: String,
-    pub agent_name: String,
-    pub agent_id: Option<String>,
-    pub agent_role: Option<String>,
-    pub parent_name: Option<String>,
-    pub claude_home: AbsolutePathBuf,
-    pub poll_interval_ms: Option<u64>,
-}
-
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
-
-    /// External agent-team identity for native teammate mode.
-    pub external_team: Option<ExternalTeamConfigToml>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
 
@@ -531,6 +514,10 @@ pub struct ConfigToml {
     pub experimental_use_unified_exec_tool: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
+
+    // fork: native teammate mode (see external_team.rs)
+    /// External agent-team identity for native teammate mode.
+    pub external_team: Option<crate::external_team::ExternalTeamConfigToml>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

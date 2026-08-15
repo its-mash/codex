@@ -274,10 +274,7 @@ impl AutomationRuntime {
         let id = format!("moncmd-{}", Uuid::now_v7());
         let display = name.clone().unwrap_or_else(|| "monitor".to_string());
         let (cancel, mut cancel_rx) = watch::channel(false);
-        self.monitor_cancels
-            .lock()
-            .await
-            .insert(id.clone(), cancel);
+        self.monitor_cancels.lock().await.insert(id.clone(), cancel);
         let runtime = self.clone();
         let monitor_id = id.clone();
         let contains_filter = contains.clone();
@@ -350,9 +347,10 @@ impl AutomationRuntime {
             .get_thread(self.thread_id)
             .await
             .map_err(|error| error.to_string())?;
+        let author = AgentPath::try_from("/root/automation".to_string())
+            .map_err(|error| format!("static automation path must be valid: {error}"))?;
         let communication = InterAgentCommunication::new(
-            AgentPath::try_from("/root/automation".to_string())
-                .expect("static automation path must be valid"),
+            author,
             AgentPath::root(),
             Vec::new(),
             content,

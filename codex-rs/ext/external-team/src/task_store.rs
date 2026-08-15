@@ -161,13 +161,8 @@ impl ClaudeTaskStore {
         patch: TaskPatch,
         expected_revision: String,
     ) -> Result<VersionedTask, String> {
-        self.patch_with_precondition(
-            id,
-            patch,
-            expected_revision,
-            TaskMutationPrecondition::Any,
-        )
-        .await
+        self.patch_with_precondition(id, patch, expected_revision, TaskMutationPrecondition::Any)
+            .await
     }
 
     async fn patch_with_precondition(
@@ -325,6 +320,7 @@ fn with_lock<T>(root: &Path, operation: impl FnOnce() -> Result<T, String>) -> R
     std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(root.join(".codex-task-write.lock"))

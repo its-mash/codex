@@ -291,8 +291,15 @@ pub(crate) fn external_agent_path(name: &str) -> AgentPath {
     if sanitized.is_empty() || sanitized == "root" {
         sanitized = format!("agent_{}", &stable_name_digest(name)[..12]);
     }
-    AgentPath::try_from(format!("/root/external/{sanitized}"))
-        .expect("sanitized external agent path must be valid")
+    // `sanitized` is a non-empty `[a-z0-9_]+` component by construction; if the
+    // AgentPath grammar ever tightens, fall back to a digest-derived name.
+    AgentPath::try_from(format!("/root/external/{sanitized}")).unwrap_or_else(|_| {
+        AgentPath::try_from(format!(
+            "/root/external/agent_{}",
+            &stable_name_digest(name)[..12]
+        ))
+        .unwrap_or_else(|_| AgentPath::root())
+    })
 }
 
 fn stable_name_digest(name: &str) -> String {
@@ -332,6 +339,9 @@ impl DeliveryJournal {
         self.ids.lock().await.contains(id)
     }
 
+    // The journal write must stay serialized with the in-memory set so a slower
+    // earlier snapshot can never overwrite a newer one; tokio's Mutex is async-aware.
+    #[allow(clippy::await_holding_invalid_type)]
     async fn record(&self, id: String) -> Result<(), String> {
         let mut ids = self.ids.lock().await;
         ids.insert(id);

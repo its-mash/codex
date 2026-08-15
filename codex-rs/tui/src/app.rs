@@ -213,11 +213,12 @@ pub(crate) mod app_server_requests;
 mod background_requests;
 mod config_persistence;
 mod event_dispatch;
+mod external_team; // fork: native-teammate mode
 mod history_pagination;
 mod history_ui;
 mod input;
 mod loaded_threads;
-mod loop_actions;
+mod loop_actions; // fork: /loop
 mod pending_interactive_replay;
 mod pets;
 mod platform_actions;

@@ -1,6 +1,6 @@
 mod capabilities;
 mod contributors;
-mod external_team;
+mod external_team; // fork
 mod registry;
 mod state;
 mod user_instructions;
@@ -77,12 +77,7 @@ pub use contributors::TurnStartInput;
 pub use contributors::TurnStopInput;
 pub use contributors::WorldStateContributionInput;
 pub use contributors::WorldStateSectionContribution;
-pub use external_team::ExternalAgent;
-pub use external_team::ExternalAgentStatus;
-pub use external_team::ExternalMessageDelivery;
-pub use external_team::ExternalTeamFuture;
-pub use external_team::ExternalTeamHandle;
-pub use external_team::ExternalTeamProvider;
+pub use external_team::*; // fork: external agent-team provider API
 pub use registry::ExtensionRegistry;
 pub use registry::ExtensionRegistryBuilder;
 pub use registry::empty_extension_registry;

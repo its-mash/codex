@@ -192,18 +192,9 @@ impl App {
         let label = self
             .agent_navigation
             .active_agent_label(self.current_displayed_thread_id(), self.primary_thread_id)
-            // In native-teammate mode there is a single thread, so the multi-agent
-            // navigation label stays hidden — but the operator still needs to know
-            // which team member this pane is. Fall back to the teammate identity.
-            .or_else(|| self.external_team_agent_label());
+            .or_else(|| self.external_team_agent_label()); // fork: native-teammate identity
         self.chat_widget.set_active_agent_label(label);
         self.sync_side_thread_ui();
-    }
-
-    /// `<agent> @ <team>` when this session is a native Codex teammate, else None.
-    pub(super) fn external_team_agent_label(&self) -> Option<String> {
-        let team = self.config.external_team.as_ref()?;
-        Some(format!("teammate {} @ {}", team.agent_name, team.team_name))
     }
 
     pub(super) async fn thread_cwd(&self, thread_id: ThreadId) -> Option<AbsolutePathBuf> {
@@ -1484,38 +1475,6 @@ impl App {
         (active_thread_id != primary_thread_id).then_some((active_thread_id, primary_thread_id))
     }
 
-    /// Returns the primary thread id when an externally managed teammate has been shut down.
-    ///
-    /// External team shutdown originates in the provider lifecycle rather than from a TUI exit
-    /// action. Closing the primary thread must therefore also close the teammate process; leaving
-    /// an interactive prompt behind would keep Claude's teammate slot alive after it acknowledged
-    /// shutdown.
-    pub(super) fn external_team_shutdown_exit_thread(
-        &self,
-        notification: &ServerNotification,
-    ) -> Option<ThreadId> {
-        let closed_thread_id = match notification {
-            ServerNotification::ThreadClosed(closed) => &closed.thread_id,
-            ServerNotification::ThreadStatusChanged(changed)
-                if matches!(
-                    changed.status,
-                    codex_app_server_protocol::ThreadStatus::NotLoaded
-                ) =>
-            {
-                &changed.thread_id
-            }
-            _ => return None,
-        };
-        if self.config.external_team.is_none() {
-            return None;
-        }
-        let active_thread_id = self.active_thread_id?;
-        let primary_thread_id = self.primary_thread_id?;
-        (active_thread_id == primary_thread_id
-            && *closed_thread_id == primary_thread_id.to_string())
-        .then_some(primary_thread_id)
-    }
-
     pub(super) fn replay_thread_snapshot(
         &mut self,
         snapshot: ThreadEventSnapshot,
@@ -1727,11 +1686,7 @@ impl App {
                 if matches!(notification.as_ref(), ServerNotification::ThreadClosed(_))
         ) && self.pending_shutdown_exit_thread_id
             == self.active_thread_id;
-        let external_team_shutdown_completed = matches!(
-            &event,
-            ThreadBufferedEvent::Notification(notification)
-                if self.external_team_shutdown_exit_thread(notification.as_ref()).is_some()
-        );
+        let external_team_shutdown_completed = self.external_team_shutdown_completed(&event);
 
         // Processing order matters:
         //
@@ -1777,9 +1732,7 @@ impl App {
         }
         let had_active_view = self.chat_widget.has_active_view();
         self.handle_thread_event_now(event);
-        if external_team_shutdown_completed {
-            self.app_event_tx.send(AppEvent::Exit(ExitMode::Immediate));
-        }
+        self.finish_external_team_shutdown(external_team_shutdown_completed);
         if !had_active_view
             && self.chat_widget.has_active_view()
             && self.startup_protected_input_boundary

@@ -49,6 +49,7 @@ use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHand
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
+use crate::tools::handlers::multi_agents_v2::external_team::plaintext_when_external;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -1165,22 +1166,14 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
             );
             registry.register_trusted_with_exposure(
                 multi_agent_v2_handler(
-                    if turn_context.config.external_team.is_some() {
-                        SendMessageHandlerV2::plaintext()
-                    } else {
-                        SendMessageHandlerV2::encrypted()
-                    },
+                    plaintext_when_external(SendMessageHandlerV2, &turn_context.config),
                     tool_namespace,
                 ),
                 exposure,
             );
             registry.register_trusted_with_exposure(
                 multi_agent_v2_handler(
-                    if turn_context.config.external_team.is_some() {
-                        FollowupTaskHandlerV2::plaintext()
-                    } else {
-                        FollowupTaskHandlerV2::encrypted()
-                    },
+                    plaintext_when_external(FollowupTaskHandlerV2, &turn_context.config),
                     tool_namespace,
                 ),
                 exposure,

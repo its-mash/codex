@@ -11,7 +11,6 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::multi_agents_common::*;
-use crate::tools::handlers::multi_agents_spec::MessageArgumentEncoding;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
@@ -37,6 +36,7 @@ pub(crate) use send_message::Handler as SendMessageHandler;
 pub(crate) use spawn::Handler as SpawnAgentHandler;
 pub(crate) use wait::Handler as WaitAgentHandler;
 
+pub(crate) mod external_team; // fork: external agent-team support (see external_team.rs)
 mod followup_task;
 mod interrupt_agent;
 mod list_agents;
@@ -60,15 +60,12 @@ fn communication_from_tool_message(
     recipient: AgentPath,
     message: String,
     source: &crate::tools::context::ToolCallSource,
-    message_encoding: MessageArgumentEncoding,
     trigger_turn: bool,
 ) -> InterAgentCommunication {
-    if message_encoding == MessageArgumentEncoding::Encrypted
-        && !matches!(
-            source,
-            crate::tools::context::ToolCallSource::DirectPlaintextMessage
-        )
-    {
+    if !matches!(
+        source,
+        crate::tools::context::ToolCallSource::DirectPlaintextMessage
+    ) {
         return InterAgentCommunication::new_encrypted(
             author,
             recipient,

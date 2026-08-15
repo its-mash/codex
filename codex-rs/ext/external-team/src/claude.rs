@@ -243,6 +243,9 @@ impl ClaudeCodeProvider {
         })
     }
 
+    // The in-process writer lock is intentionally held across the blocking append so
+    // this process's inbox writes are ordered; tokio's Mutex is async-aware.
+    #[allow(clippy::await_holding_invalid_type)]
     async fn append_message(&self, target: &str, content: &str) -> Result<(), String> {
         if content.trim().is_empty() {
             return Err("external teammate messages must not be empty".to_string());
@@ -287,9 +290,10 @@ impl ClaudeCodeProvider {
         author: &str,
         request_id: &str,
     ) -> Result<(), String> {
-        let author = self.resolve_agent(author).await?.ok_or_else(|| {
-            format!("shutdown requester `{author}` is not on the external team")
-        })?;
+        let author = self
+            .resolve_agent(author)
+            .await?
+            .ok_or_else(|| format!("shutdown requester `{author}` is not on the external team"))?;
         if author.name != self.parent().name {
             return Err(format!(
                 "external agent `{}` is not authorized to shut down `{}`",
@@ -454,6 +458,7 @@ fn append_message_sync(
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(lock_path)

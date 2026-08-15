@@ -6,6 +6,7 @@ mod config_requirements;
 pub mod config_toml;
 mod constraint;
 mod diagnostics;
+pub mod external_team;
 mod fingerprint;
 mod hook_config;
 mod host_name;

@@ -1,5 +1,5 @@
-use std::fs::OpenOptions;
 use std::collections::HashSet;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -257,11 +257,9 @@ impl AutomationStore {
                     }
                     let claim_available = job.delivery_owner.as_deref()
                         == Some(request.owner.as_str())
-                        || job
-                            .delivery_lease_expires_at
-                            .is_none_or(|expires_at| {
-                                expires_at <= request.claimed_at.timestamp_millis()
-                            });
+                        || job.delivery_lease_expires_at.is_none_or(|expires_at| {
+                            expires_at <= request.claimed_at.timestamp_millis()
+                        });
                     if job.enabled
                         && claim_available
                         && (job.pending_fire_at.is_some()
@@ -498,6 +496,7 @@ fn mutate_state<T>(
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(parent.join(".automation.lock"))

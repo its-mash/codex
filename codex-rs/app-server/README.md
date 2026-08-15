@@ -858,33 +858,6 @@ While compaction is running, the thread is effectively in a turn so clients shou
 { "id": 25, "result": {} }
 ```
 
-### Example: Manage durable loops
-
-`loop/create`, `loop/list`, and `loop/delete` control the same durable scheduler exposed to a thread's native automation tools. A fired loop enters through the thread's inter-agent mailbox and wakes an idle thread; clients do not need to start a model turn when creating or deleting it. Timestamps are Unix seconds. `loop/list` accepts optional `cursor` and `limit` fields and returns `nextCursor`.
-
-```json
-{ "method": "loop/create", "id": 26, "params": {
-  "threadId": "thr_b",
-  "prompt": "Reconcile the mock task board.",
-  "everySeconds": 900,
-  "name": "reconcile"
-} }
-{ "id": 26, "result": { "loop": {
-  "id": "0198...", "name": "reconcile", "prompt": "Reconcile the mock task board.",
-  "everySeconds": 900, "enabled": true, "createdAt": 1786450000,
-  "nextDueAt": 1786450900, "lastRunAt": null
-} } }
-
-{ "method": "loop/list", "id": 27, "params": {
-  "threadId": "thr_b", "cursor": null, "limit": 100
-} }
-{ "id": 27, "result": { "data": [ ... ], "nextCursor": null } }
-
-{ "method": "loop/delete", "id": 28, "params": {
-  "threadId": "thr_b", "id": "0198..."
-} }
-```
-
 ### Example: Run a thread shell command
 
 Use `thread/shellCommand` for the TUI `!` workflow. The request returns immediately with `{}`.

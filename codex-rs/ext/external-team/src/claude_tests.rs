@@ -378,7 +378,12 @@ async fn routes_peer_member_messages_in_both_directions() {
     );
 
     // Peers never gain lifecycle authority.
-    assert!(!provider.is_parent("claude-worker").await.expect("resolve peer"));
+    assert!(
+        !provider
+            .is_parent("claude-worker")
+            .await
+            .expect("resolve peer")
+    );
     assert_eq!(
         provider
             .acknowledge_shutdown("claude-worker", "peer-shutdown-1")
@@ -425,7 +430,12 @@ async fn only_configured_parent_can_acknowledge_shutdown() {
     let provider = provider(&temp_dir);
 
     assert!(provider.is_parent("team-lead").await.expect("resolve lead"));
-    assert!(!provider.is_parent("codex-worker").await.expect("resolve member"));
+    assert!(
+        !provider
+            .is_parent("codex-worker")
+            .await
+            .expect("resolve member")
+    );
     assert_eq!(
         provider
             .acknowledge_shutdown("codex-worker", "unauthorized-shutdown")
@@ -438,7 +448,12 @@ async fn only_configured_parent_can_acknowledge_shutdown() {
 #[tokio::test]
 async fn missing_team_config_is_an_absent_roster_not_a_parse_failure() {
     let temp_dir = TempDir::new().expect("temp dir");
-    assert!(!provider(&temp_dir).is_on_roster().await.expect("missing roster"));
+    assert!(
+        !provider(&temp_dir)
+            .is_on_roster()
+            .await
+            .expect("missing roster")
+    );
 }
 
 #[tokio::test]
