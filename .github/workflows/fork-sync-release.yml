@@ -285,13 +285,27 @@ jobs:
         working-directory: codex-rs
         run: cargo clean --release --target ${{ matrix.target }} -p v8 || true
 
-      - name: Build release binaries
+      - name: Build Codex CLI
         shell: bash
         working-directory: codex-rs
         run: |
-          set -euo pipefail
-          cargo build --release --locked --target ${{ matrix.target }} --bin codex -p codex-cli
-          cargo build --release --locked --target ${{ matrix.target }} --bin codex-code-mode-host -p codex-code-mode-host
+          set -uo pipefail
+          log="$RUNNER_TEMP/codex-cli-build.log"
+          if ! cargo build --release --locked --target ${{ matrix.target }} --bin codex -p codex-cli 2>&1 | tee "$log"; then
+            python3 ../.github/scripts/annotate_ci_failure.py "Codex CLI release build failed" "$log"
+            exit 1
+          fi
+
+      - name: Build code mode host
+        shell: bash
+        working-directory: codex-rs
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/code-mode-host-build.log"
+          if ! cargo build --release --locked --target ${{ matrix.target }} --bin codex-code-mode-host -p codex-code-mode-host 2>&1 | tee "$log"; then
+            python3 ../.github/scripts/annotate_ci_failure.py "Code mode host release build failed" "$log"
+            exit 1
+          fi
 
       - name: Package standalone archive
         id: package
