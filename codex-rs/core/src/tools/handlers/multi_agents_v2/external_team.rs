@@ -240,7 +240,10 @@ impl<H: CoreToolRuntime> ToolExecutor<ToolInvocation> for ExternalTeamMessageToo
         self.inner.search_info()
     }
 
-    fn handle(&self, mut invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+    fn handle<'a>(&'a self, mut invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
+    where
+        ToolInvocation: 'a,
+    {
         if self.plaintext && matches!(invocation.source, ToolCallSource::Direct) {
             // Upstream's message flow only skips encryption for
             // `DirectPlaintextMessage`; the model was told (via `spec`) to send

@@ -131,7 +131,9 @@ struct MonitorStartArgs {
 }
 
 impl AutomationTool {
-    pub(crate) fn all(runtime: AutomationRuntime) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
+    pub(crate) fn all(
+        runtime: AutomationRuntime,
+    ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
         [
             AutomationToolKind::LoopCreate,
             AutomationToolKind::LoopList,
@@ -154,12 +156,15 @@ impl AutomationTool {
             Arc::new(Self {
                 runtime: runtime.clone(),
                 kind,
-            }) as Arc<dyn ToolExecutor<ToolCall>>
+            }) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
         })
         .collect()
     }
 
-    async fn handle_call(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+    async fn handle_call(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let value = match self.kind {
             AutomationToolKind::LoopCreate => {
                 let args = parse_args::<LoopCreateArgs>(&call)?;
@@ -340,7 +345,7 @@ impl AutomationTool {
     }
 }
 
-impl ToolExecutor<ToolCall> for AutomationTool {
+impl<'call> ToolExecutor<ToolCall<'call>> for AutomationTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(self.kind.name())
     }
@@ -349,7 +354,10 @@ impl ToolExecutor<ToolCall> for AutomationTool {
         self.kind.spec()
     }
 
-    fn handle(&self, call: ToolCall) -> codex_extension_api::ToolExecutorFuture<'_> {
+    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
+    where
+        'call: 'a,
+    {
         Box::pin(self.handle_call(call))
     }
 }

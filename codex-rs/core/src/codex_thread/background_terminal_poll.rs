@@ -2,6 +2,7 @@
 //! the native automation `Monitor` tool to stream matching stdout lines.
 
 use super::CodexThread;
+use crate::unified_exec::WriteStdinContext;
 use crate::unified_exec::WriteStdinRequest;
 use codex_protocol::protocol::TruncationPolicy;
 use std::time::Duration;
@@ -25,14 +26,17 @@ impl CodexThread {
             .session
             .services
             .unified_exec_manager
-            .write_stdin(WriteStdinRequest {
-                process_id,
-                input: "",
-                yield_time_ms: wait.as_millis().try_into().unwrap_or(u64::MAX),
-                max_output_tokens: Some(4_096),
-                truncation_policy: TruncationPolicy::Bytes(64 * 1024),
-                interaction_event: None,
-            })
+            .write_stdin(
+                WriteStdinContext::BackgroundPoll,
+                WriteStdinRequest {
+                    process_id,
+                    input: "",
+                    yield_time_ms: wait.as_millis().try_into().unwrap_or(u64::MAX),
+                    max_output_tokens: Some(4_096),
+                    truncation_policy: TruncationPolicy::Bytes(64 * 1024),
+                    interaction_event: None,
+                },
+            )
             .await
             .map_err(|error| error.to_string())?;
         Ok(BackgroundTerminalPoll {

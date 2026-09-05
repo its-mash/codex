@@ -73,7 +73,9 @@ struct UpdateTaskArgs {
 }
 
 impl ClaudeTaskTool {
-    pub(crate) fn all(store: Arc<ClaudeTaskStore>) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
+    pub(crate) fn all(
+        store: Arc<ClaudeTaskStore>,
+    ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
         [
             TaskToolKind::List,
             TaskToolKind::Get,
@@ -87,12 +89,15 @@ impl ClaudeTaskTool {
             Arc::new(Self {
                 store: store.clone(),
                 kind,
-            }) as Arc<dyn ToolExecutor<ToolCall>>
+            }) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
         })
         .collect()
     }
 
-    async fn handle_call(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+    async fn handle_call(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let value = match self.kind {
             TaskToolKind::List => {
                 parse_args::<EmptyArgs>(&call)?;
@@ -170,7 +175,7 @@ impl ClaudeTaskTool {
 #[serde(deny_unknown_fields)]
 struct EmptyArgs {}
 
-impl ToolExecutor<ToolCall> for ClaudeTaskTool {
+impl<'call> ToolExecutor<ToolCall<'call>> for ClaudeTaskTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(self.kind.name())
     }
@@ -179,7 +184,10 @@ impl ToolExecutor<ToolCall> for ClaudeTaskTool {
         self.kind.spec()
     }
 
-    fn handle(&self, call: ToolCall) -> codex_extension_api::ToolExecutorFuture<'_> {
+    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
+    where
+        'call: 'a,
+    {
         Box::pin(self.handle_call(call))
     }
 }

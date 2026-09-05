@@ -21,6 +21,7 @@ use codex_extension_api::TurnItemContributor;
 use codex_protocol::ThreadId;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::TurnItem;
+use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::MessagePhase;
 
 use crate::claude::ClaudeCodeProvider;
@@ -154,10 +155,13 @@ impl ContextContributor for ExternalTeamExtension {
             };
             let identity = handle.provider().identity();
             let parent = handle.provider().parent();
-            vec![PromptFragment::developer_capability(format!(
-                "You are Codex teammate `{}` in an externally managed agent team. The external parent is `{}`. Use the existing `send_message` and `followup_task` collaboration tools with external teammate names; use `task_list`, `task_get`, `task_create`, `task_claim`, `task_update`, and `task_complete` for the shared team task board. Do not use terminal input, tmux, or provider-specific bus tools for team communication. Your private Codex subagents remain under `/root/...`. Your final answer is automatically delivered to the external parent.",
-                identity.name, parent.name
-            ))]
+            vec![PromptFragment::developer_capability(
+                format!(
+                    "You are Codex teammate `{}` in an externally managed agent team. The external parent is `{}`. Use the existing `send_message` and `followup_task` collaboration tools with external teammate names; use `task_list`, `task_get`, `task_create`, `task_claim`, `task_update`, and `task_complete` for the shared team task board. Do not use terminal input, tmux, or provider-specific bus tools for team communication. Your private Codex subagents remain under `/root/...`. Your final answer is automatically delivered to the external parent.",
+                    identity.name, parent.name
+                ),
+                ContentItemKind("external_team.instructions".to_string()),
+            )]
         })
     }
 }
@@ -167,7 +171,7 @@ impl ToolContributor for ExternalTeamExtension {
         &self,
         _session_store: &ExtensionData,
         thread_store: &ExtensionData,
-    ) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
+    ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
         thread_store
             .get::<ClaudeTaskStore>()
             .map(ClaudeTaskTool::all)

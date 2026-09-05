@@ -15,6 +15,7 @@ use codex_extension_api::ToolCall;
 use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
 use codex_protocol::ThreadId;
+use codex_protocol::models::ContentItemKind;
 
 use crate::runtime::AutomationHandle;
 use crate::runtime::AutomationRuntime;
@@ -100,6 +101,7 @@ impl ContextContributor for AutomationExtension {
             vec![PromptFragment::developer_capability(
                 "Native durable automation is available. Use loop_create/list/stop for recurring self-work, cron_create/list/update/delete/run for UTC schedules, and monitor_start/list/stop to attach to an existing background terminal. Scheduled and monitor events enter through native inter-agent delivery and wake idle threads; never use tmux keystrokes or ad-hoc sleep loops as a scheduler."
                     .to_string(),
+                ContentItemKind("automation.instructions".to_string()),
             )]
         })
     }
@@ -110,7 +112,7 @@ impl ToolContributor for AutomationExtension {
         &self,
         _session_store: &ExtensionData,
         thread_store: &ExtensionData,
-    ) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
+    ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
         thread_store
             .get::<AutomationRuntime>()
             .map(|runtime| AutomationTool::all(runtime.as_ref().clone()))

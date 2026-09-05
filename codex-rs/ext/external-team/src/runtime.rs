@@ -211,7 +211,10 @@ async fn run_inbox_worker(
                     );
                     communication.internal_chat_message_metadata_passthrough = None;
                     match thread
-                        .submit(Op::InterAgentCommunication { communication })
+                        .submit(Op::InterAgentCommunication {
+                            communication,
+                            start_options: Default::default(),
+                        })
                         .await
                     {
                         Ok(_) => {

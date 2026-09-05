@@ -12,8 +12,12 @@ pub(crate) enum UnifiedExecError {
     // The model is trained on `session_id`, but internally we track a `process_id`.
     #[error("Unknown process id {process_id}")]
     UnknownProcessId { process_id: i32 },
+    #[error("stdin approval failed: {0:?}")]
+    StdinApproval(crate::tools::sandboxing::ToolError),
     #[error("failed to write to stdin")]
     WriteToStdin,
+    #[error("background terminal polling cannot write to stdin")]
+    BackgroundPollInput,
     #[error(
         "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
     )]

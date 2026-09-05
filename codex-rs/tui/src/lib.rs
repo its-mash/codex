@@ -21,7 +21,9 @@ pub use crate::startup_error::LocalStateDbStartupError;
 use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
+pub use app::DisconnectInfo;
 pub use app::ExitReason;
+pub use app::ResumableThread;
 use app_server_session::AppServerSession;
 use app_server_session::ThreadParamsMode;
 use codex_app_server_client::AppServerClient;
@@ -48,6 +50,7 @@ use codex_config::format_config_error_with_source;
 use codex_config::types::ResumeCwdMode;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimePaths;
+use codex_features::Feature;
 use codex_login::AuthConfig;
 use codex_login::default_client::originator;
 use codex_login::default_client::set_default_client_residency_requirement;
@@ -56,6 +59,7 @@ use codex_login::is_workload_identity_selected;
 use codex_protocol::ThreadId;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::AltScreenMode;
+use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::SandboxMode;
 #[cfg(target_os = "windows")]
 use codex_protocol::config_types::WindowsSandboxLevel;
@@ -73,6 +77,7 @@ pub use session_archive_commands::DeleteConfirmation;
 pub use session_archive_commands::SessionArchiveAction;
 pub use session_archive_commands::SessionArchiveCommandOptions;
 pub use session_archive_commands::run_session_archive_command;
+pub use session_queue_commands::run_session_queue_command;
 use std::fs::OpenOptions;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -102,6 +107,7 @@ mod app_server_approval_conversions;
 mod app_server_session;
 mod approval_events;
 mod ascii_animation;
+mod backend_banners;
 mod bottom_pane;
 mod branch_summary;
 mod chatwidget;
@@ -119,6 +125,8 @@ mod cwd_prompt;
 mod debug_config;
 mod diff_model;
 mod diff_render;
+mod dynamic_tools;
+mod dynamic_tools_mcp;
 mod exec_cell;
 mod exec_command;
 mod external_agent_config_migration;
@@ -160,7 +168,6 @@ mod npm_registry;
 pub(crate) mod onboarding;
 mod oss_selection;
 mod pager_overlay;
-mod permission_compat;
 pub(crate) mod public_widgets;
 mod render;
 mod resize_reflow_cap;
@@ -169,9 +176,10 @@ mod selection_list;
 mod service_tier_resolution;
 mod session_archive_commands;
 mod session_log;
+mod session_queue_commands;
 mod session_resume;
+mod session_start;
 mod session_state;
-mod shimmer;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;
@@ -183,6 +191,8 @@ mod status;
 mod status_indicator_widget;
 mod streaming;
 mod style;
+mod task_mentions;
+mod temporary_structured_request;
 mod terminal_hyperlinks;
 mod terminal_palette;
 mod terminal_probe;
@@ -196,6 +206,7 @@ mod tooltips;
 mod transcript_reflow;
 mod tui;
 mod ui_consts;
+mod unarchive_prompt;
 pub(crate) mod update_action;
 pub use update_action::UpdateAction;
 #[cfg(not(debug_assertions))]
@@ -207,6 +218,7 @@ mod updates;
 #[cfg(any(not(debug_assertions), test))]
 mod updates_cache;
 mod version;
+mod vim_search;
 mod width;
 #[cfg(any(target_os = "windows", test))]
 mod windows_sandbox;
@@ -733,6 +745,7 @@ fn latest_session_lookup_params(
         source_kinds: Some(resume_source_kinds(include_non_interactive)),
         archived: Some(false),
         section_id: None,
+        project_id: None,
         parent_thread_id: None,
         ancestor_thread_id: None,
         cwd: cwd_filter.map(|cwd| ThreadListCwdFilter::One(cwd.to_string_lossy().to_string())),
@@ -942,6 +955,7 @@ pub async fn run_main(
             token_usage: TokenUsage::default(),
             thread_id: None,
             resume_hint: None,
+            disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::UserRequested,
         }),
@@ -1001,6 +1015,7 @@ async fn run_ratatui_app(
                         token_usage: crate::token_usage::TokenUsage::default(),
                         thread_id: None,
                         resume_hint: None,
+                        disconnect_info: None,
                         update_action: Some(action),
                         exit_reason: ExitReason::UserRequested,
                     });
@@ -1073,10 +1088,36 @@ async fn run_ratatui_app(
             }
         }
     }
+    let remote_project_trust =
+        if uses_remote_workspace && let Some(remote_cwd) = remote_cwd_override.as_deref() {
+            match startup_draft
+                .run_until(
+                    &mut tui,
+                    config_update::read_remote_project_trust(
+                        app_server_session.request_handle(),
+                        remote_cwd,
+                    ),
+                )
+                .await
+            {
+                Ok(Ok(remote_project_trust)) => remote_project_trust,
+                Ok(Err(err)) => {
+                    shutdown_startup_session(Some(app_server_session), &mut terminal_restore_guard)
+                        .await;
+                    return Err(err);
+                }
+                Err(err) => {
+                    shutdown_startup_session(Some(app_server_session), &mut terminal_restore_guard)
+                        .await;
+                    return Err(err.into());
+                }
+            }
+        } else {
+            None
+        };
     let mut app_server = Some(app_server_session);
-
-    let should_show_trust_screen_flag =
-        !uses_remote_workspace && should_show_trust_screen(&initial_config);
+    let should_show_trust_screen_flag = remote_project_trust.is_some()
+        || (!uses_remote_workspace && should_show_trust_screen(&initial_config));
     #[cfg(target_os = "windows")]
     let mut trust_decision_was_made = false;
     let startup_model_provider = initial_config.model_provider_id.clone();
@@ -1114,10 +1155,14 @@ async fn run_ratatui_app(
         // Authentication can change while any interactive onboarding screen is open.
         startup_account = None;
         let show_login_screen = should_show_login_screen(login_status, &initial_config);
+        let bedrock_setup_enabled =
+            should_show_bedrock_setup_wizard(login_status, &initial_config, &app_server_target);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
                 show_login_screen,
+                bedrock_setup_enabled,
                 show_trust_screen: should_show_trust_screen_flag,
+                remote_project_trust,
                 login_status,
                 app_server_request_handle: app_server
                     .as_ref()
@@ -1146,13 +1191,15 @@ async fn run_ratatui_app(
                 token_usage: crate::token_usage::TokenUsage::default(),
                 thread_id: None,
                 resume_hint: None,
+                disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::UserRequested,
             });
         }
         #[cfg(target_os = "windows")]
         {
-            trust_decision_was_made = onboarding_result.directory_trust_persisted;
+            trust_decision_was_made =
+                !uses_remote_workspace && onboarding_result.directory_trust_persisted;
         }
         let reloaded_config = startup_draft
             .run_until(&mut tui, async {
@@ -1169,8 +1216,8 @@ async fn run_ratatui_app(
 
                 // Reload config when persisted trust or auth changes alter the current process.
                 Ok::<_, std::io::Error>(
-                    if onboarding_result.directory_trust_persisted
-                        || (show_login_screen && !uses_remote_workspace)
+                    if !uses_remote_workspace
+                        && (onboarding_result.directory_trust_persisted || show_login_screen)
                     {
                         load_config_or_exit(
                             cli_kv_overrides.clone(),
@@ -1197,7 +1244,7 @@ async fn run_ratatui_app(
         initial_config
     };
     startup_draft.apply_config(&config);
-    if !(cli.resume_picker || cli.fork_picker)
+    if !(cli.resume_picker || cli.fork_picker || cli.agents_overview)
         && let Err(err) = startup_draft.show(&mut tui)
     {
         shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
@@ -1217,6 +1264,7 @@ async fn run_ratatui_app(
                 token_usage: crate::token_usage::TokenUsage::default(),
                 thread_id: None,
                 resume_hint: None,
+                disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::Fatal(format!(
                     "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
@@ -1225,7 +1273,9 @@ async fn run_ratatui_app(
         };
 
     let use_fork = cli.fork_picker || cli.fork_last || cli.fork_session_id.is_some();
-    let session_selection = if use_fork {
+    let session_selection = if cli.agents_overview {
+        resume_picker::SessionSelection::AgentsOverview
+    } else if use_fork {
         if let Some(id_str) = cli.fork_session_id.as_deref() {
             let Some(startup_app_server) = app_server.as_mut() else {
                 unreachable!("app server should be initialized for --fork <id>");
@@ -1310,6 +1360,7 @@ async fn run_ratatui_app(
                         token_usage: crate::token_usage::TokenUsage::default(),
                         thread_id: None,
                         resume_hint: None,
+                        disconnect_info: None,
                         update_action: None,
                         exit_reason: ExitReason::UserRequested,
                     });
@@ -1404,6 +1455,7 @@ async fn run_ratatui_app(
                     token_usage: crate::token_usage::TokenUsage::default(),
                     thread_id: None,
                     resume_hint: None,
+                    disconnect_info: None,
                     update_action: None,
                     exit_reason: ExitReason::UserRequested,
                 });
@@ -1453,6 +1505,7 @@ async fn run_ratatui_app(
                 token_usage: crate::token_usage::TokenUsage::default(),
                 thread_id: None,
                 resume_hint: None,
+                disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::UserRequested,
             });
@@ -1558,6 +1611,14 @@ async fn run_ratatui_app(
 
     let use_alt_screen = determine_alt_screen_mode(no_alt_screen, config.tui_alternate_screen);
     tui.set_alt_screen_enabled(use_alt_screen);
+    if config.model_provider_id != startup_model_provider {
+        startup_account = None;
+        if matches!(&app_server_target, AppServerTarget::Embedded) {
+            // App-server providers are fixed at startup, so onboarding cannot
+            // reuse a server initialized before it persisted another provider.
+            shutdown_app_server_if_present(app_server.take()).await;
+        }
+    }
     let mut app_server = match app_server {
         Some(app_server) => app_server,
         None => match startup_draft
@@ -1609,9 +1670,6 @@ async fn run_ratatui_app(
     let bypass_hook_trust_for_startup_review = config.bypass_hook_trust && !is_persistent_resume;
     let hooks_request_handle = app_server.request_handle();
     let hooks_cwd = config.cwd.to_path_buf();
-    if config.model_provider_id != startup_model_provider {
-        startup_account = None;
-    }
     let startup_prefetch_started_at = Instant::now();
     let startup_prefetch = startup_draft
         .run_until(&mut tui, async {
@@ -1886,6 +1944,25 @@ fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool 
     login_status == LoginStatus::NotAuthenticated
 }
 
+fn should_show_bedrock_setup_wizard(
+    login_status: LoginStatus,
+    config: &Config,
+    app_server_target: &AppServerTarget,
+) -> bool {
+    matches!(app_server_target, AppServerTarget::Embedded)
+        && should_show_login_screen(login_status, config)
+        && config.features.enabled(Feature::BedrockSetupWizard)
+        && config.model_provider_id == "openai"
+        && config
+            .config_layer_stack
+            .effective_config()
+            .get("model_provider")
+            .is_none()
+        && config
+            .auth_config()
+            .is_login_method_allowed(ForcedLoginMethod::Api)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1907,6 +1984,83 @@ mod tests {
             .codex_home(temp_dir.path().to_path_buf())
             .build()
             .await
+    }
+
+    #[tokio::test]
+    async fn bedrock_setup_wizard_requires_eligible_onboarding() -> color_eyre::Result<()> {
+        let shared_endpoint = RemoteAppServerEndpoint::WebSocket {
+            websocket_url: "ws://127.0.0.1:4500/".to_string(),
+            auth_token: None,
+        };
+        let enabled = "[features]\nbedrock_setup_wizard = true\n";
+
+        for (label, config_toml, login_status, target, expected) in [
+            (
+                "disabled by default",
+                "",
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::Embedded,
+                false,
+            ),
+            (
+                "enabled for the default provider",
+                enabled,
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::Embedded,
+                true,
+            ),
+            (
+                "explicit provider",
+                "model_provider = \"openai\"\n[features]\nbedrock_setup_wizard = true\n",
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::Embedded,
+                false,
+            ),
+            (
+                "forced ChatGPT login",
+                "forced_login_method = \"chatgpt\"\n[features]\nbedrock_setup_wizard = true\n",
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::Embedded,
+                false,
+            ),
+            (
+                "existing authentication",
+                enabled,
+                LoginStatus::AuthMode(AuthMode::Chatgpt),
+                AppServerTarget::Embedded,
+                false,
+            ),
+            (
+                "shared local daemon",
+                enabled,
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::LocalDaemon {
+                    endpoint: shared_endpoint.clone(),
+                },
+                false,
+            ),
+            (
+                "remote app server",
+                enabled,
+                LoginStatus::NotAuthenticated,
+                AppServerTarget::Remote {
+                    endpoint: shared_endpoint,
+                },
+                false,
+            ),
+        ] {
+            let codex_home = TempDir::new()?;
+            std::fs::write(codex_home.path().join("config.toml"), config_toml)?;
+            let config = build_config(&codex_home).await?;
+
+            assert_eq!(
+                should_show_bedrock_setup_wizard(login_status, &config, &target),
+                expected,
+                "{label}"
+            );
+        }
+
+        Ok(())
     }
 
     fn write_session_rollout(
@@ -2966,6 +3120,15 @@ mod tests {
         )?;
 
         assert_eq!(config_cwd, None);
+        let local_daemon = AppServerTarget::LocalDaemon {
+            endpoint: RemoteAppServerEndpoint::UnixSocket {
+                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+            },
+        };
+        assert!(uses_remote_workspace_or_environment(
+            &local_daemon,
+            &environment_manager
+        ));
         Ok(())
     }
 

@@ -36,6 +36,7 @@ pub(crate) use send_message::Handler as SendMessageHandler;
 pub(crate) use spawn::Handler as SpawnAgentHandler;
 pub(crate) use wait::Handler as WaitAgentHandler;
 
+mod analytics;
 pub(crate) mod external_team; // fork: external agent-team support (see external_team.rs)
 mod followup_task;
 mod interrupt_agent;

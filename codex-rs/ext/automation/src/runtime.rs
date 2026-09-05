@@ -357,7 +357,10 @@ impl AutomationRuntime {
             /*trigger_turn*/ true,
         );
         thread
-            .submit(Op::InterAgentCommunication { communication })
+            .submit(Op::InterAgentCommunication {
+                communication,
+                start_options: Default::default(),
+            })
             .await
             .map(|_| ())
             .map_err(|error| error.to_string())
