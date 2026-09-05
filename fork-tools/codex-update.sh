@@ -82,13 +82,15 @@ tmp="$(mktemp -d "$STATE_DIR/.dl.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
 # gh release download resolves the tag, auth, redirects, and public/private
-# uniformly. The REST browser_download_url path is only for hosts without gh.
-if command -v gh >/dev/null 2>&1; then
-  gh release download "$latest_tag" --repo "$REPO_SLUG" \
-    --pattern "*-${TARGET_TRIPLE}.tar.gz" --pattern "*-${TARGET_TRIPLE}.tar.gz.sha256" \
-    --dir "$tmp" --clobber >>"$LOG_FILE" 2>&1 ||
-    fail "gh release download failed for $latest_tag"
-else
+# uniformly. Fall back to the public REST URL when gh is absent or unauthenticated.
+downloaded_with_gh=0
+if command -v gh >/dev/null 2>&1 &&
+   gh release download "$latest_tag" --repo "$REPO_SLUG" \
+     --pattern "*-${TARGET_TRIPLE}.tar.gz" --pattern "*-${TARGET_TRIPLE}.tar.gz.sha256" \
+     --dir "$tmp" --clobber >>"$LOG_FILE" 2>&1; then
+  downloaded_with_gh=1
+fi
+if [[ "$downloaded_with_gh" -eq 0 ]]; then
   dl_url="$(python3 -c '
 import json,sys
 d=json.load(open(sys.argv[1])); triple=sys.argv[2]
