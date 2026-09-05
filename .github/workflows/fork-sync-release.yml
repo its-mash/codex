@@ -196,14 +196,34 @@ jobs:
           short="$(git rev-parse --short HEAD)"
           echo "short_sha=$short" >> "$GITHUB_OUTPUT"
           echo "tag=fork-$(date -u +%Y%m%d-%H%M%S)-$short" >> "$GITHUB_OUTPUT"
+          release_is_complete() {
+            local tag="$1" assets suffix
+            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[].name' 2>/dev/null || true)"
+            for suffix in \
+              x86_64-unknown-linux-gnu.tar.gz \
+              x86_64-unknown-linux-gnu.tar.gz.sha256 \
+              x86_64-pc-windows-msvc.zip \
+              x86_64-pc-windows-msvc.zip.sha256; do
+              grep -q -- "-${suffix}$" <<<"$assets" || return 1
+            done
+          }
           if [ "${FORCE:-false}" = "true" ]; then
             echo "needed=1" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # Idempotent: skip if a release for this exact HEAD already exists.
-          if gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
-              --json tagName --jq '.[].tagName' 2>/dev/null | grep -q -- "-$short\$"; then
-            echo "HEAD $short already released; skipping."
-            echo "needed=0" >> "$GITHUB_OUTPUT"; exit 0
+          # Idempotent only when a release for this exact HEAD has every asset.
+          # A failed upload can leave a checksum-only release behind; that must
+          # trigger another build instead of becoming the new baseline.
+          head_release="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+            --json tagName --jq '.[].tagName' 2>/dev/null \
+            | grep -- "-$short\$" | head -1 || true)"
+          if [ -n "$head_release" ]; then
+            if release_is_complete "$head_release"; then
+              echo "HEAD $short already has a complete release; skipping."
+              echo "needed=0" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "HEAD $short has incomplete release $head_release; rebuilding."
+            echo "needed=1" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # Nothing that lands in a binary changed since the last release? Then a
           # rebuild would be byte-for-byte pointless (docs, workflow, fork-tools
@@ -212,6 +232,7 @@ jobs:
                     --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
           last_sha="${last##*-}"
           if [ -n "$last_sha" ] && git cat-file -e "${last_sha}^{commit}" 2>/dev/null \
+             && release_is_complete "$last" \
              && git diff --quiet "$last_sha" HEAD -- codex-rs; then
             echo "No codex-rs/ changes since ${last}; skipping build."
             echo "needed=0" >> "$GITHUB_OUTPUT"
@@ -368,5 +389,16 @@ jobs:
           Install / use on both platforms: see \`fork-tools/README.md\`."
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" --notes "$notes" 2>/dev/null \
-            || echo "Release $TAG already exists; uploading into it."
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+            || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          for asset in dist/*; do
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$asset"; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::Failed to upload $(basename "$asset") after $attempt attempts."
+                exit 1
+              fi
+              sleep "$((attempt * 10))"
+            done
+          done
