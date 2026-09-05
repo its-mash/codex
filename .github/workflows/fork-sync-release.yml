@@ -390,7 +390,9 @@ jobs:
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" --notes "$notes" 2>/dev/null \
             || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-          for asset in dist/*; do
+          uploaded=0
+          for asset in dist/*.tar.gz dist/*.tar.gz.sha256 dist/*.zip dist/*.zip.sha256; do
+            [ -f "$asset" ] || continue
             for attempt in 1 2 3; do
               if gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$asset"; then
                 break
@@ -401,4 +403,9 @@ jobs:
               fi
               sleep "$((attempt * 10))"
             done
+            uploaded="$((uploaded + 1))"
           done
+          if [ "$uploaded" -ne 2 ]; then
+            echo "::error::Expected two release assets for this platform, found $uploaded."
+            exit 1
+          fi
