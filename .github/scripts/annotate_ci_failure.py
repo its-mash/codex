@@ -15,6 +15,8 @@ def escape_workflow_command(value: str) -> str:
 
 
 def main() -> None:
+    if len(sys.argv) != 3:
+        raise SystemExit(f"usage: {Path(sys.argv[0]).name} TITLE LOG_PATH")
     title, log_path = sys.argv[1:]
     log = Path(log_path).read_text(encoding="utf-8", errors="replace")
     tail = ANSI_ESCAPE.sub("", log[-MAX_ANNOTATION_CHARS:])
